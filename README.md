@@ -38,6 +38,12 @@ pi install -l .
 
 Pi packages execute with the permissions of the Pi process. Review `extensions/image-zoom.ts` before installing.
 
+Pi loads the extension from this directory, so it uses this directory's `node_modules`. If Pi reports `Cannot find module 'sharp'`, the dependencies are not installed. Run this here, then restart Pi:
+
+```bash
+npm ci
+```
+
 ## Use
 
 Attach an image in any normal Pi way, then ask a question that may require fine detail:
