@@ -138,6 +138,10 @@ test("calibrates, recursively zooms, intercepts read, and restores branch state"
     assert.ok(second.details.rootCrop.height < first.details.rootCrop.height);
     assert.equal(second.content[1].mimeType, "image/png");
 
+    const unselected = await tool.execute("call-3", { x1: 3000, y1: 1500, x2: 3400, y2: 1800 }, undefined, undefined, ctx);
+    assert.equal(unselected.details.sourceId, "image:0");
+    assert.deepEqual(unselected.details.rootCrop, { left: 3000, top: 1500, width: 400, height: 300 });
+
     const [readResult] = await pi.emit(
       "tool_result",
       {
