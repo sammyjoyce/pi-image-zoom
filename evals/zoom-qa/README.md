@@ -12,8 +12,8 @@ Measures whether Pi, running Opus 5.5 with the `zoom_image` extension, answers f
 ```bash
 npm ci
 node evals/zoom-qa/generate-cases.mjs            # renders images/ (gitignored), rebuilds cases.jsonl
-export PI_GATEWAY_KEY=...                        # gateway key; Pi reads it via the generated models.json
-# optional: ZOOM_EVAL_BASE_URL (default https://gateway.sammy.sh), ZOOM_EVAL_THINKING (default medium),
+# gateway key and URL: PI_GATEWAY_KEY / ZOOM_EVAL_BASE_URL, else ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL
+# optional: ZOOM_EVAL_THINKING (default medium),
 #           ZOOM_EVAL_CASES=table-0,chart-0 to run only those cases
 
 F=.claude/hillclimb/zoom-qa

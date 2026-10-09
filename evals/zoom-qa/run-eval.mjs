@@ -145,8 +145,9 @@ const REF_EXTS = ['', '.html', '.txt', '.json'];
 // path, or null for the no-extension arm); default is extensions/image-zoom.ts.
 //
 // Environment:
-//   PI_GATEWAY_KEY      gateway API key (read by Pi through models.json; never logged)
-//   ZOOM_EVAL_BASE_URL  default https://gateway.sammy.sh
+//   PI_GATEWAY_KEY      gateway API key (read by Pi through models.json; never logged);
+//                       falls back to ANTHROPIC_API_KEY
+//   ZOOM_EVAL_BASE_URL  falls back to ANTHROPIC_BASE_URL, then https://gateway.sammy.sh
 //   ZOOM_EVAL_THINKING  Pi thinking level, default medium
 //   ZOOM_EVAL_CASES     optional comma-separated case ids to run (default: all)
 
@@ -158,7 +159,9 @@ import { basename } from 'node:path';
 const EVAL_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(EVAL_DIR, '..', '..');
 const PI_BIN = join(REPO_ROOT, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'cli.js');
-const BASE_URL = process.env.ZOOM_EVAL_BASE_URL || 'https://gateway.sammy.sh';
+const BASE_URL = process.env.ZOOM_EVAL_BASE_URL || process.env.ANTHROPIC_BASE_URL || 'https://gateway.sammy.sh';
+// models.json reads the key as $PI_GATEWAY_KEY; fall back to the host's Anthropic key.
+const GATEWAY_KEY = process.env.PI_GATEWAY_KEY || process.env.ANTHROPIC_API_KEY;
 const THINKING = process.env.ZOOM_EVAL_THINKING || 'medium';
 const PROVIDER = 'zoomeval';
 const DEFAULT_EXTENSION = 'extensions/image-zoom.ts';
@@ -243,7 +246,7 @@ async function runCase(input, ctx) {
       message,
     ];
     const timeoutMs = ctx.timeoutS > 0 ? Math.max(1000, (ctx.timeoutS - 5) * 1000) : 0;
-    const env = { ...process.env, PI_CODING_AGENT_DIR: config, PI_OFFLINE: '1', PI_SKIP_VERSION_CHECK: '1' };
+    const env = { ...process.env, PI_GATEWAY_KEY: GATEWAY_KEY, PI_CODING_AGENT_DIR: config, PI_OFFLINE: '1', PI_SKIP_VERSION_CHECK: '1' };
     const res = await runPi(args, { cwd: work, env }, timeoutMs);
 
     const events = [];
