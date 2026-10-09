@@ -46,12 +46,17 @@ const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replac
 const SANS = "DejaVu Sans";
 const MONO = "DejaVu Sans Mono";
 
+// ZOOM_EVAL_SCALE renders every image S times larger in pixels while keeping
+// text the same pixel size, so the same scene is S times harder to read from
+// Pi's 2000px downscale. Layout code works in 1x units; targets scale in addCase.
+const SCALE = Number(process.env.ZOOM_EVAL_SCALE || 2);
 async function render(name, width, height, body, background = "#ffffff") {
+  body = body.replace(/font-size="([\d.]+)"/g, (_, n) => `font-size="${n / SCALE}"`);
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
 <rect width="${width}" height="${height}" fill="${background}"/>
 ${body}
 </svg>`;
-  await sharp(Buffer.from(svg)).png({ compressionLevel: 9 }).toFile(join(imageDir, name));
+  await sharp(Buffer.from(svg), { density: 72 * SCALE }).png({ compressionLevel: 9 }).toFile(join(imageDir, name));
   return name;
 }
 
@@ -272,6 +277,9 @@ const ANSWER_INSTRUCTION =
 
 const cases = [];
 function addCase({ id, tags, images, question, expected, answer_type, target, image_dir = "images" }) {
+  if (target && image_dir === "images") {
+    target = { ...target, left: target.left * SCALE, top: target.top * SCALE, width: target.width * SCALE, height: target.height * SCALE };
+  }
   const prompt = `${images.map((f) => `@${f}`).join(" ")} ${question}\n\n${ANSWER_INSTRUCTION}`;
   cases.push({ id, tags, image_dir, images, question, prompt, expected, answer_type, target: target ?? null });
 }
