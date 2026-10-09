@@ -1,3 +1,13 @@
 node_modules/
 *.tgz
 .DS_Store
+
+# zoom-qa eval: regenerated or bulky output
+evals/zoom-qa/images/
+evals/zoom-qa/.dev-run.mjs
+.claude/hillclimb/**/traces/
+.claude/hillclimb/**/out/
+.claude/hillclimb/**/report.html
+.claude/hillclimb/**/state.json
+.claude/hillclimb/**/trajectory/
+.claude/hillclimb/**/progress.txt
