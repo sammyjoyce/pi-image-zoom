@@ -1,27 +1,134 @@
 {
   "flow": "zoom-qa",
-  "description": "Fine-detail visual Q&A through the real pi CLI (Opus 5.5 via gateway.sammy.sh, --thinking medium). baseline = zoom_image extension loaded; v1 = no extension.",
+  "description": "zoom_image extension hillclimb on 2x cases (ZOOM_EVAL_SCALE=2). Pi 0.82.1, Opus 5.5 via host gateway, --thinking medium. baseline = extension at commit 80f270d; vN = one change each.",
   "metrics": [
-    { "id": "correct", "label": "Correct", "kind": "binary" },
-    { "id": "format_ok", "label": "ANSWER line", "kind": "binary" },
-    { "id": "refused", "label": "Refused", "kind": "binary", "better": "lower" }
+    {
+      "id": "correct",
+      "label": "Correct",
+      "kind": "binary"
+    },
+    {
+      "id": "format_ok",
+      "label": "ANSWER line",
+      "kind": "binary"
+    },
+    {
+      "id": "refused",
+      "label": "Refused",
+      "kind": "binary",
+      "better": "lower"
+    }
   ],
   "perf_fields": [
-    { "id": "cost_usd", "label": "Cost", "unit": "$" },
-    { "id": "latency_s", "label": "Latency", "unit": "s" },
-    { "id": "zoom_calls", "label": "Zoom calls" },
-    { "id": "zoom_on_target", "label": "Zoom on target" },
-    { "id": "tool_calls", "label": "Tool calls" },
-    { "id": "in_tokens", "label": "In tokens" },
-    { "id": "out_tokens", "label": "Out tokens" }
+    {
+      "id": "cost_usd",
+      "label": "Cost",
+      "unit": "$"
+    },
+    {
+      "id": "latency_s",
+      "label": "Latency",
+      "unit": "s"
+    },
+    {
+      "id": "zoom_calls",
+      "label": "Zoom calls"
+    },
+    {
+      "id": "zoom_on_target",
+      "label": "Zoom on target"
+    },
+    {
+      "id": "tool_calls",
+      "label": "Tool calls"
+    },
+    {
+      "id": "in_tokens",
+      "label": "In tokens"
+    },
+    {
+      "id": "out_tokens",
+      "label": "Out tokens"
+    }
   ],
-  "prices": { "claude-opus-5-5": { "in": 4, "out": 20 } },
-  "variant_config": {
-    "baseline": { "extension": "extensions/image-zoom.ts" },
-    "v1": { "extension": null }
+  "prices": {
+    "claude-opus-5-5": {
+      "in": 4,
+      "out": 20
+    }
   },
   "harness_paths": [
     "evals/zoom-qa/cases.jsonl",
     "evals/zoom-qa/generate-cases.mjs"
-  ]
+  ],
+  "current_round": 5,
+  "reps": 2,
+  "goal": {
+    "target": "cost_usd",
+    "direction": "lower",
+    "hold": [
+      "correct"
+    ],
+    "also": "latency_s"
+  },
+  "approve_each_round": false,
+  "train_ids": [
+    "table-2",
+    "table-1",
+    "table-3",
+    "table-4",
+    "chart-5",
+    "chart-4",
+    "chart-0",
+    "ui-toggle-3",
+    "ui-toggle-0",
+    "ui-toggle-2",
+    "diagram-4",
+    "diagram-1",
+    "diagram-0",
+    "label-0",
+    "label-3",
+    "multi-1",
+    "easy-1",
+    "easy-3",
+    "absent-chart",
+    "absent-table"
+  ],
+  "test_ids": [
+    "table-5",
+    "table-6",
+    "table-7",
+    "table-0",
+    "chart-2",
+    "chart-1",
+    "chart-3",
+    "ui-build-5",
+    "ui-toggle-1",
+    "ui-build-4",
+    "diagram-5",
+    "diagram-3",
+    "diagram-2",
+    "label-1",
+    "label-2",
+    "label-4",
+    "multi-0",
+    "multi-2",
+    "easy-2",
+    "easy-0",
+    "absent-label",
+    "absent-ui"
+  ],
+  "harness_sha": "553ff08d38bbae9560fa34d3314de74ba96d6ed552c1011235dfe5d24231b1cb",
+  "best": {
+    "round": 3,
+    "test_usd": 0.0562,
+    "test_lat": 12.3,
+    "test_correct": "44/44"
+  },
+  "commits": {
+    "baseline": "d23f19d",
+    "v1": "c46ae0a",
+    "v2": "f350171",
+    "v3": "fc781f6"
+  }
 }

@@ -1,0 +1,73 @@
+{
+  "flow": "zoom-qa",
+  "description": "1x cases (ZOOM_EVAL_SCALE=1), 2 reps. baseline = extension, v1 = no extension.",
+  "metrics": [
+    {
+      "id": "correct",
+      "label": "Correct",
+      "kind": "binary"
+    },
+    {
+      "id": "format_ok",
+      "label": "ANSWER line",
+      "kind": "binary"
+    },
+    {
+      "id": "refused",
+      "label": "Refused",
+      "kind": "binary",
+      "better": "lower"
+    }
+  ],
+  "perf_fields": [
+    {
+      "id": "cost_usd",
+      "label": "Cost",
+      "unit": "$"
+    },
+    {
+      "id": "latency_s",
+      "label": "Latency",
+      "unit": "s"
+    },
+    {
+      "id": "zoom_calls",
+      "label": "Zoom calls"
+    },
+    {
+      "id": "zoom_on_target",
+      "label": "Zoom on target"
+    },
+    {
+      "id": "tool_calls",
+      "label": "Tool calls"
+    },
+    {
+      "id": "in_tokens",
+      "label": "In tokens"
+    },
+    {
+      "id": "out_tokens",
+      "label": "Out tokens"
+    }
+  ],
+  "prices": {
+    "claude-opus-5-5": {
+      "in": 4,
+      "out": 20
+    }
+  },
+  "variant_config": {
+    "baseline": {
+      "extension": "extensions/image-zoom.ts"
+    },
+    "v1": {
+      "extension": null
+    }
+  },
+  "harness_paths": [
+    "evals/zoom-qa/cases.jsonl",
+    "evals/zoom-qa/generate-cases.mjs"
+  ],
+  "harness_sha": "785c23fb79deedb8a6213c72034ab829b60304f43078d3e5b30caabab65b7ce3"
+}

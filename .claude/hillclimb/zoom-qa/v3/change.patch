@@ -1,0 +1,43 @@
+diff --git a/src/geometry.ts b/src/geometry.ts
+index 465e513..39c216f 100644
+--- a/src/geometry.ts
++++ b/src/geometry.ts
+@@ -84,10 +84,16 @@ export function resizedSize(width: number, height: number, budget: ImageBudget):
+ }
+ 
+ /** Return the largest aspect-preserving output that fills the configured budget. */
++/**
++ * Crops are magnified at most this much. Beyond 2x the model reads no more
++ * detail, but every extra pixel is image tokens it re-reads on later turns.
++ */
++export const MAX_ZOOM_MAGNIFICATION = 2;
++
+ export function zoomSize(width: number, height: number, budget: ImageBudget): Dimensions {
+   assertPositiveInteger(width, "width");
+   assertPositiveInteger(height, "height");
+-  return resizedSize(width * 10_000, height * 10_000, budget);
++  return resizedSize(width * MAX_ZOOM_MAGNIFICATION, height * MAX_ZOOM_MAGNIFICATION, budget);
+ }
+ 
+ export function clampCoordinateBox(
+diff --git a/test/geometry.test.ts b/test/geometry.test.ts
+index 556e1f1..f6d08a1 100644
+--- a/test/geometry.test.ts
++++ b/test/geometry.test.ts
+@@ -28,11 +28,11 @@ test("resizedSize preserves aspect ratio and budget", () => {
+   assert.ok(Math.abs(size.width / size.height - 1.5) < 0.01);
+ });
+ 
+-test("zoomSize expands a small crop to the available budget", () => {
+-  const size = zoomSize(200, 100, standard);
+-  assert.ok(size.width > 200);
+-  assert.equal(size.width / size.height, 2);
+-  assert.ok(countImagePatches(size.width, size.height) <= standard.maxPatches);
++test("zoomSize magnifies a small crop 2x and a large crop only up to the budget", () => {
++  assert.deepEqual(zoomSize(200, 100, standard), { width: 400, height: 200 });
++  const large = zoomSize(1200, 600, standard);
++  assert.ok(large.width < 2400);
++  assert.ok(countImagePatches(large.width, large.height) <= standard.maxPatches);
+ });
+ 
+ test("clampCoordinateBox clips to the visible image", () => {

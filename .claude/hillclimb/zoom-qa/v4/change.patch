@@ -1,0 +1,25 @@
+diff --git a/extensions/image-zoom.ts b/extensions/image-zoom.ts
+index 1364b19..2e039e5 100644
+--- a/extensions/image-zoom.ts
++++ b/extensions/image-zoom.ts
+@@ -656,7 +656,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
+     promptGuidelines: [
+       "Use zoom_image whenever labels, text, boundaries, crossings, UI controls, or other image details are too small to read reliably.",
+       "For zoom_image on an attached or read image, give coordinates in the original image's pixel grid: estimate the region on the preview you see, then multiply by the factor reported in pi-image-zoom-context. Never use preview pixels or normalized 0-1 coordinates.",
+-      "After zoom_image returns a zoom:* source_id, use that source_id for a tighter recursive crop rather than guessing at unreadable detail; its coordinates are the returned crop's pixel size.",
++      "Crop only the region you need to read, not the strip, band, or panel around it. Output is capped at the preview's size budget, so a crop spanning most of the image comes back no sharper than the preview. Re-crop a zoom:* result only if it is still unreadable.",
+       "Prefer JPEG for normal iterative inspection and PNG when tiny text or one-pixel line work needs lossless rendering.",
+     ],
+     parameters: ZoomParameters,
+diff --git a/src/context.ts b/src/context.ts
+index 35c0746..4df2b44 100644
+--- a/src/context.ts
++++ b/src/context.ts
+@@ -95,6 +95,6 @@ export function buildZoomContextBlock(metadata: ZoomContextMetadata[]): string {
+   return [
+     ...metadata.map(encodeZoomContext),
+     ...metadata.map(describeCoordinateFrame),
+-    "Use zoom_image when fine detail is too small to read. A returned zoom:N source can be zoomed again using coordinates in that crop's returned pixel size.",
++    "Use zoom_image when fine detail is too small to read.",
+   ].join("\n");
+ }

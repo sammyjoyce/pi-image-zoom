@@ -11,3 +11,4 @@ evals/zoom-qa/.dev-run.mjs
 .claude/hillclimb/**/state.json
 .claude/hillclimb/**/trajectory/
 .claude/hillclimb/**/progress.txt
+.claude/hillclimb/**/ref/
