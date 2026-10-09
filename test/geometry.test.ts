@@ -28,11 +28,11 @@ test("resizedSize preserves aspect ratio and budget", () => {
   assert.ok(Math.abs(size.width / size.height - 1.5) < 0.01);
 });
 
-test("zoomSize expands a small crop to the available budget", () => {
-  const size = zoomSize(200, 100, standard);
-  assert.ok(size.width > 200);
-  assert.equal(size.width / size.height, 2);
-  assert.ok(countImagePatches(size.width, size.height) <= standard.maxPatches);
+test("zoomSize magnifies a small crop 2x and a large crop only up to the budget", () => {
+  assert.deepEqual(zoomSize(200, 100, standard), { width: 400, height: 200 });
+  const large = zoomSize(1200, 600, standard);
+  assert.ok(large.width < 2400);
+  assert.ok(countImagePatches(large.width, large.height) <= standard.maxPatches);
 });
 
 test("clampCoordinateBox clips to the visible image", () => {

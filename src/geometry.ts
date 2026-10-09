@@ -84,10 +84,16 @@ export function resizedSize(width: number, height: number, budget: ImageBudget):
 }
 
 /** Return the largest aspect-preserving output that fills the configured budget. */
+/**
+ * Crops are magnified at most this much. Beyond 2x the model reads no more
+ * detail, but every extra pixel is image tokens it re-reads on later turns.
+ */
+export const MAX_ZOOM_MAGNIFICATION = 2;
+
 export function zoomSize(width: number, height: number, budget: ImageBudget): Dimensions {
   assertPositiveInteger(width, "width");
   assertPositiveInteger(height, "height");
-  return resizedSize(width * 10_000, height * 10_000, budget);
+  return resizedSize(width * MAX_ZOOM_MAGNIFICATION, height * MAX_ZOOM_MAGNIFICATION, budget);
 }
 
 export function clampCoordinateBox(

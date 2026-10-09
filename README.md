@@ -2,7 +2,7 @@
 
 A Pi extension that gives multimodal models an iterative **lean in and look closer** tool.
 
-The extension registers `zoom_image`, which accepts an absolute pixel rectangle, crops that region from the full-resolution source, magnifies it to the available image budget, and returns the crop as the tool result. It is based on the design in Anthropic's [`crop_tool.ipynb`](https://github.com/anthropics/claude-cookbooks/blob/main/multimodal/crop_tool.ipynb), adapted for Pi's extension and session model.
+The extension registers `zoom_image`, which accepts an absolute pixel rectangle, crops that region from the full-resolution source, magnifies it up to 2x within the image budget, and returns the crop as the tool result. It is based on the design in Anthropic's [`crop_tool.ipynb`](https://github.com/anthropics/claude-cookbooks/blob/main/multimodal/crop_tool.ipynb), adapted for Pi's extension and session model.
 
 ## What is different from a basic crop command
 
