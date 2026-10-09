@@ -55,21 +55,18 @@ Attach an image in any normal Pi way, then ask a question that may require fine 
 Pi injects metadata similar to:
 
 ```text
-image_index=0
-source_id="image:0"
-coordinate space=1432x840
-full-resolution source=4032x2366
+image:0 (image_index 0): zoom_image coordinates are pixels of the 4032x2366 original. The attached picture is a 1432x840 preview; multiply preview coordinates by 2.82.
 ```
 
-The model can then call:
+The model can then call, in original pixels:
 
 ```json
 {
   "image_index": 0,
-  "x1": 540,
-  "y1": 210,
-  "x2": 900,
-  "y2": 520
+  "x1": 1520,
+  "y1": 590,
+  "x2": 2540,
+  "y2": 1470
 }
 ```
 

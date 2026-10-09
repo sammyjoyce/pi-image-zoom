@@ -11,6 +11,7 @@ import {
   buildZoomContextBlock,
   extractFileTagPaths,
   parseZoomContexts,
+  removePiDimensionNotes,
   removeZoomContexts,
   type ZoomContextMetadata,
 } from "../src/context.ts";
@@ -126,10 +127,11 @@ const ZoomParameters = Type.Object(
       }),
     ),
     x1: Type.Integer({
-      description: "Left edge in absolute pixels of the selected source coordinate space (origin is top-left).",
+      description:
+        "Left edge in pixels of the selected source's coordinate space (origin top-left): original full-resolution pixels for image:N and path sources, the returned crop's pixel size for zoom:N sources.",
     }),
     y1: Type.Integer({
-      description: "Top edge in absolute pixels of the selected source coordinate space.",
+      description: "Top edge in pixels of the selected source's coordinate space.",
     }),
     x2: Type.Integer({
       description: "Right edge in absolute pixels; must be greater than x1.",
@@ -374,12 +376,15 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       height: rootDimensions.height,
       input: rootInput,
     };
+    // The model addresses an attached image in the original's pixel grid, the
+    // same frame Pi's own resize note and path sources use. The overview it sees
+    // is only a preview; the context block reports the preview-to-original scale.
     const source: SourceRecord = {
       id: sourceId,
       rootId: sourceId,
       label,
-      viewWidth: overview.width,
-      viewHeight: overview.height,
+      viewWidth: root.width,
+      viewHeight: root.height,
       rootRect: { left: 0, top: 0, width: root.width, height: root.height },
       imageIndex,
       path: canonicalPath,
@@ -422,8 +427,8 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       id: metadata.sourceId,
       rootId: metadata.sourceId,
       label: root.label,
-      viewWidth: metadata.view.width,
-      viewHeight: metadata.view.height,
+      viewWidth: root.width,
+      viewHeight: root.height,
       rootRect: { left: 0, top: 0, width: root.width, height: root.height },
       imageIndex: metadata.imageIndex,
       path: metadata.path,
@@ -440,13 +445,12 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
         height: details.root.height,
         input: { kind: "path", path: details.root.path },
       };
-      const sourceView = details.sourceId === details.rootId ? details.sourceView : root;
       const rootSource: SourceRecord = {
         id: details.rootId,
         rootId: details.rootId,
         label: root.label,
-        viewWidth: sourceView.width,
-        viewHeight: sourceView.height,
+        viewWidth: root.width,
+        viewHeight: root.height,
         rootRect: { left: 0, top: 0, width: root.width, height: root.height },
         path: details.root.path,
       };
@@ -524,7 +528,11 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     }
 
     if (metadata.length === 0) return { action: "continue" };
-    const cleanText = removeZoomContexts(event.text);
+    // Pi's note describes the preview Pi made, which was just replaced; its
+    // "displayed at" size and multiplier would state a second, wrong frame.
+    const withoutStaleNotes =
+      metadata.length === event.images.length ? removePiDimensionNotes(event.text) : event.text;
+    const cleanText = removeZoomContexts(withoutStaleNotes);
     const contextBlock = buildZoomContextBlock(metadata);
     const text = cleanText.length > 0 ? `${cleanText}\n\n${contextBlock}` : contextBlock;
     return { action: "transform", text, images: preparedImages };
@@ -553,9 +561,11 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     try {
       const path = normalizePathArgument(rawPath, ctx.cwd);
       const registered = await registerIncomingImage(image, path, "read", contentImageIndex, ctx.signal);
-      const content = event.content.map((part: TextContent | ImageContent, index: number) =>
-        index === imageContentIndex ? registered.image : part,
-      );
+      const content = event.content.map((part: TextContent | ImageContent, index: number) => {
+        if (index === imageContentIndex) return registered.image;
+        if (part.type === "text") return { ...part, text: removePiDimensionNotes(part.text) };
+        return part;
+      });
       content.push({ type: "text", text: buildZoomContextBlock([registered.metadata]) });
       return {
         content,
@@ -640,12 +650,12 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     name: TOOL_NAME,
     label: "Image zoom",
     description:
-      "Crop and magnify a rectangular region from an image's full-resolution root. Coordinates are absolute pixels in the source coordinate space reported beside the image. Select with source_id, image_index, or path; when omitted, the most recent image/zoom is used. Each result returns a new source_id that can be cropped again without losing the link to the original pixels.",
+      "Crop and magnify a rectangular region from an image's full-resolution root. For image:N and path sources, coordinates are pixels of the original full-resolution image (the attached picture is a downscaled preview; pi-image-zoom-context reports its size and the multiplier). For zoom:N sources, coordinates are pixels of that crop's returned size. Select with source_id, image_index, or path; when omitted, the most recent image/zoom is used. Each result returns a new source_id that can be cropped again without losing the link to the original pixels.",
     promptSnippet: "Crop and magnify fine detail from attached or filesystem images",
     promptGuidelines: [
       "Use zoom_image whenever labels, text, boundaries, crossings, UI controls, or other image details are too small to read reliably.",
-      "For zoom_image, use absolute pixel coordinates in the coordinate space reported by pi-image-zoom-context; do not use normalized 0-1 coordinates.",
-      "After zoom_image returns a zoom:* source_id, use that source_id for a tighter recursive crop rather than guessing at unreadable detail.",
+      "For zoom_image on an attached or read image, give coordinates in the original image's pixel grid: estimate the region on the preview you see, then multiply by the factor reported in pi-image-zoom-context. Never use preview pixels or normalized 0-1 coordinates.",
+      "After zoom_image returns a zoom:* source_id, use that source_id for a tighter recursive crop rather than guessing at unreadable detail; its coordinates are the returned crop's pixel size.",
       "Prefer JPEG for normal iterative inspection and PNG when tiny text or one-pixel line work needs lossless rendering.",
     ],
     parameters: ZoomParameters,

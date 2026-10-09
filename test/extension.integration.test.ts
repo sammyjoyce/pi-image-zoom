@@ -115,7 +115,8 @@ test("calibrates, recursively zooms, intercepts read, and restores branch state"
     assert.equal(firstMeta.width, first.details.output.width);
     assert.equal(firstMeta.height, first.details.output.height);
     assert.ok(first.details.output.width > first.details.clampedBox.x2 - first.details.clampedBox.x1);
-    assert.ok(first.details.rootCrop.width < 4000);
+    assert.deepEqual(first.details.rootCrop, { left: 650, top: 140, width: 350, height: 360 });
+    assert.doesNotMatch(inputResult.text, /Multiply coordinates by/);
 
     const second = await tool.execute(
       "call-2",
