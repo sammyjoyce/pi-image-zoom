@@ -788,12 +788,17 @@ test("the result text states the real scale of the crop", async () => {
       (await tool.execute("call", { path, ...box }, undefined, undefined, ctx)).content[0].text;
 
     const reduced = await textOf({ x1: 0, y1: 0, x2: 3000, y2: 400 });
-    assert.match(reduced, /reduced it to 0\.52x \(1568x209px\)/);
-    assert.match(reduced, /A box of about 1568x209 or smaller/);
+    assert.match(reduced, /reduced it to 0\.52x \(1568x209px\) to fit the image budget\. Crop a smaller box/);
     assert.doesNotMatch(reduced, /magnified/);
+    assert.match(await textOf({ x1: 0, y1: 0, x2: 1574, y2: 400 }), /reduced it to 0\.99x \(1568x398px\)/);
 
     assert.match(await textOf({ x1: 100, y1: 100, x2: 300, y2: 200 }), /magnified it 2\.00x to 400x200px/);
     assert.match(await textOf({ x1: 0, y1: 0, x2: 1568, y2: 400 }), /returned it at full resolution \(1568x400px\)/);
+
+    const tall = join(dir, "tall.png");
+    await writeSolidImage(tall, 40, 2320, "#00ff00");
+    const column = await tool.execute("call", { path: tall, x1: 0, y1: 0, x2: 1, y2: 2320 }, undefined, undefined, ctx);
+    assert.match(column.content[0].text, /reduced it to 0\.67x \(1x1568px\)/);
 
     const clipped = await textOf({ x1: 2800, y1: 300, x2: 3600, y2: 500 });
     assert.match(clipped, /The requested box \(2800,300\)-\(3600,500\) extends past the 3000x400px image and was clipped\./);

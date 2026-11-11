@@ -317,17 +317,15 @@ function describeCrop(details: ZoomDetails): string {
 
   const cropped = `Cropped (${rootCrop.left},${rootCrop.top}) ${rootCrop.width}x${rootCrop.height}px from the ${root.width}x${root.height}px full-resolution root`;
   const size = `${output.width}x${output.height}px`;
-  const scale = output.width / rootCrop.width;
-  if (Math.abs(scale - 1) < 0.005) {
+  const scale = Math.min(output.width / rootCrop.width, output.height / rootCrop.height);
+  if (scale < 1) {
+    // Rounded down, so a crop that lost any pixels never reads as 1.00x.
+    const shown = (Math.floor(scale * 100) / 100).toFixed(2);
+    lines.push(`${cropped} and reduced it to ${shown}x (${size}) to fit the image budget. Crop a smaller box to see it at full resolution.`);
+  } else if (scale < 1.005) {
     lines.push(`${cropped} and returned it at full resolution (${size}).`);
-  } else if (scale > 1) {
-    lines.push(`${cropped} and magnified it ${scale.toFixed(2)}x to ${size}.`);
   } else {
-    const fullResolutionWidth = Math.floor((output.width * (clampedBox.x2 - clampedBox.x1)) / rootCrop.width);
-    const fullResolutionHeight = Math.floor((output.height * (clampedBox.y2 - clampedBox.y1)) / rootCrop.height);
-    lines.push(
-      `${cropped} and reduced it to ${scale.toFixed(2)}x (${size}) to fit the image budget, so fine detail is lost. A box of about ${fullResolutionWidth}x${fullResolutionHeight} or smaller in this coordinate space comes back at full resolution.`,
-    );
+    lines.push(`${cropped} and magnified it ${scale.toFixed(2)}x to ${size}.`);
   }
   return lines.join("\n");
 }
