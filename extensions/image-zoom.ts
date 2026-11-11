@@ -199,10 +199,22 @@ function withoutPlaceholders(args: unknown): unknown {
   return Object.fromEntries(Object.entries(args).filter(([, value]) => value !== null && value !== "null"));
 }
 
+/**
+ * Hard links and macOS firmlinks reach one file through paths that realpath leaves different, so
+ * the file identity decides. Some filesystems report inode 0 for every file and fall back to the
+ * resolved path.
+ */
 async function isSameFile(first: string, second: string): Promise<boolean> {
   if (first === second) return true;
-  const [firstReal, secondReal] = await Promise.all([first, second].map((path) => realpath(path).catch(() => undefined)));
-  return firstReal !== undefined && firstReal === secondReal;
+  const [firstStat, secondStat] = await Promise.all(
+    [first, second].map((path) => stat(path, { bigint: true }).catch(() => undefined)),
+  );
+  if (!firstStat || !secondStat) return false;
+  if (firstStat.ino !== 0n && secondStat.ino !== 0n) {
+    return firstStat.dev === secondStat.dev && firstStat.ino === secondStat.ino;
+  }
+  const [firstReal, secondReal] = await Promise.all([realpath(first), realpath(second)]);
+  return firstReal === secondReal;
 }
 
 function positiveIntegerFromEnv(name: string, fallback: number): number {

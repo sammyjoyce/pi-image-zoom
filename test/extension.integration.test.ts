@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import test from "node:test";
 import { basename, join } from "node:path";
@@ -323,15 +323,17 @@ test("invalid save extensions and failed writes do not consume zoom ids", async 
   assert.equal(next.details.resultSourceId, "zoom:1");
 });
 
-test("save_path cannot overwrite any registered source, including a symlink", async (t) => {
+test("save_path cannot overwrite any registered source, including a symlink or a hard link", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-source-save-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const path = join(dir, "source.png");
   const other = join(dir, "other.png");
   const alias = join(dir, "alias.png");
+  const hardLink = join(dir, "hard.png");
   await writeSolidImage(path, 600, 400, "#336699");
   await writeSolidImage(other, 200, 200, "#ff0000");
   await symlink(path, alias);
+  await link(path, hardLink);
   const original = await readFile(path);
   const pi = new MockPi();
   imageZoomExtension(pi as any);
@@ -340,7 +342,7 @@ test("save_path cannot overwrite any registered source, including a symlink", as
   const box = { x1: 10, y1: 20, x2: 110, y2: 70 };
 
   await tool.execute("register", { ...box, path }, undefined, undefined, ctx);
-  for (const [source, save_path] of [[path, path], [other, path], [other, alias]]) {
+  for (const [source, save_path] of [[path, path], [other, path], [other, alias], [other, hardLink]]) {
     await assert.rejects(
       tool.execute("overwrite", { ...box, path: source, save_path }, undefined, undefined, ctx),
       /cannot overwrite a registered source image.*unchanged pixels/,
