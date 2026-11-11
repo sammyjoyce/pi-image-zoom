@@ -564,6 +564,9 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
   // Images loaded later through Pi's built-in read tool also become calibrated,
   // full-resolution roots before the next model turn.
   pi.on("tool_result", async (event, ctx) => {
+    // A nested result reaches only the tool that made the call. Replacing its content drops the
+    // structuredContent that a script receives.
+    if (event.parentToolCallId) return;
     if (event.toolName !== "read" || event.isError) return;
     const imageContentIndex = event.content.findIndex(isImageContent);
     if (imageContentIndex < 0) return;
