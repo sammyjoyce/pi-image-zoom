@@ -317,3 +317,55 @@ test("read results handled at the same time get separate image ids", async () =>
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("placeholder values for unused parameters are ignored", () => {
+  const pi = new MockPi();
+  imageZoomExtension(pi as any);
+  const tool = pi.tools.get("zoom_image");
+  const validate = (args: JsonObject) =>
+    validateToolArguments(tool, {
+      type: "toolCall",
+      id: "call",
+      name: "zoom_image",
+      arguments: tool.prepareArguments(args),
+    });
+  const box = { x1: 0, y1: 480, x2: 953, y2: 960 };
+
+  assert.deepEqual(
+    validate({ ...box, path: "page.png", source_id: "null", profile: "null", output_format: "null", extra: null }),
+    { ...box, path: "page.png" },
+  );
+  assert.deepEqual(validate({ ...box, source_id: "image:0", path: "null", profile: "high" }), {
+    ...box,
+    source_id: "image:0",
+    profile: "high",
+  });
+  assert.throws(() => validate({ ...box, x1: "null" }), /x1: missing/);
+});
+
+test("source_id and path may both be sent when they name the same image", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-selectors-"));
+  try {
+    const red = join(dir, "red.png");
+    const green = join(dir, "green.png");
+    await writeSolidImage(red, 1000, 600, "#ff0000");
+    await writeSolidImage(green, 800, 800, "#00ff00");
+
+    const pi = new MockPi();
+    imageZoomExtension(pi as any);
+    const ctx = makeContext(dir);
+    const { contexts } = await emitImageResult(pi, ctx, "read", red);
+    const tool = pi.tools.get("zoom_image");
+    const box = { x1: 0, y1: 0, x2: 100, y2: 100 };
+
+    const same = await tool.execute("call", { ...box, source_id: contexts[0].sourceId, path: red }, undefined, undefined, ctx);
+    assert.equal(same.details.root.path, red);
+
+    await assert.rejects(
+      tool.execute("call", { ...box, source_id: contexts[0].sourceId, path: green }, undefined, undefined, ctx),
+      /source_id "image:0" and path ".*green\.png" name different images/,
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
