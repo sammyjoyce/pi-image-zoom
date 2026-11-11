@@ -231,6 +231,18 @@ function normalizePathArgument(rawPath: string, cwd: string): string {
   return isAbsolute(value) ? resolve(value) : resolve(cwd, value);
 }
 
+/**
+ * macOS writes a narrow no-break space before AM or PM in screenshot names, and a model types a
+ * plain space. Pi's read tool tries the same variant.
+ */
+async function resolveImagePath(rawPath: string, cwd: string): Promise<string> {
+  const path = normalizePathArgument(rawPath, cwd);
+  const screenshotPath = path.replace(/ (AM|PM)\./gi, "\u202F$1.");
+  if (screenshotPath === path) return path;
+  const exists = (candidate: string) => stat(candidate).then(() => true, () => false);
+  return !(await exists(path)) && (await exists(screenshotPath)) ? screenshotPath : path;
+}
+
 function isLikelyImagePath(path: string): boolean {
   return IMAGE_EXTENSIONS.has(extname(path).toLowerCase());
 }
@@ -555,7 +567,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     if (!rawPath) return;
 
     try {
-      const path = normalizePathArgument(rawPath, ctx.cwd);
+      const path = await resolveImagePath(rawPath, ctx.cwd);
       const registered = await registerIncomingImage(image, path, "read", contentImageIndex, ctx.signal);
       const content = event.content.map((part: TextContent | ImageContent, index: number) => {
         if (index === imageContentIndex) return registered.image;
@@ -577,7 +589,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     if (params.source_id !== undefined && params.path !== undefined) {
       const named = sources.get(params.source_id);
       const namesWholeImage = named?.id === named?.rootId && named?.path !== undefined;
-      if (named && !(namesWholeImage && (await isSameFile(named.path!, normalizePathArgument(params.path, cwd))))) {
+      if (named && !(namesWholeImage && (await isSameFile(named.path!, await resolveImagePath(params.path, cwd))))) {
         throw new Error(
           `source_id ${JSON.stringify(params.source_id)} and path ${JSON.stringify(params.path)} name different images. Send only one of them.`,
         );
@@ -590,7 +602,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       source = sources.get(params.source_id);
       if (!source) throw new Error(`Unknown source_id ${JSON.stringify(params.source_id)}. Run /zoom-images to list sources.`);
     } else if (params.path !== undefined) {
-      const path = normalizePathArgument(params.path, cwd);
+      const path = await resolveImagePath(params.path, cwd);
       await assertUsablePath(path);
       const existingSourceId = pathToSourceId.get(path);
       source = existingSourceId ? sources.get(existingSourceId) : undefined;
