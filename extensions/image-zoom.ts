@@ -5,8 +5,8 @@ import { basename, extname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { int, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
 import { Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
 import {
   buildZoomContextBlock,
   extractFileTagPaths,
@@ -106,81 +106,66 @@ interface ZoomDetails {
   profile: ProfileName;
 }
 
-const ZoomParameters = Type.Object(
-  {
-    source_id: Type.Optional(
-      Type.String({
-        description:
-          'Source identifier reported beside an image or by a previous zoom, for example "image:0" or "zoom:2".',
-      }),
-    ),
-    image_index: Type.Optional(
-      Type.Integer({
-        minimum: 0,
-        description: "Root image index reported in pi-image-zoom-context. Omit when there is only one image.",
-      }),
-    ),
-    path: Type.Optional(
-      Type.String({
-        description:
-          "Path to an image. Prefer source_id/image_index when Pi already reported one; direct paths use original pixels unless view_width/view_height are supplied.",
-      }),
-    ),
-    x1: Type.Integer({
+const ZoomParameters = obj({
+  source_id: opt(
+    str({
       description:
-        "Left edge in pixels of the selected source's coordinate space (origin top-left): original full-resolution pixels for image:N and path sources, the returned crop's pixel size for zoom:N sources.",
+        'Source identifier reported beside an image or by a previous zoom, for example "image:0" or "zoom:2".',
     }),
-    y1: Type.Integer({
-      description: "Top edge in pixels of the selected source's coordinate space.",
+  ),
+  image_index: opt(
+    int({
+      minimum: 0,
+      description: "Root image index reported in pi-image-zoom-context. Omit when there is only one image.",
     }),
-    x2: Type.Integer({
-      description: "Right edge in absolute pixels; must be greater than x1.",
+  ),
+  path: opt(
+    str({
+      description:
+        "Path to an image. Prefer source_id/image_index when Pi already reported one; direct paths use original pixels unless view_width/view_height are supplied.",
     }),
-    y2: Type.Integer({
-      description: "Bottom edge in absolute pixels; must be greater than y1.",
+  ),
+  x1: int({
+    description:
+      "Left edge in pixels of the selected source's coordinate space (origin top-left): original full-resolution pixels for image:N and path sources, the returned crop's pixel size for zoom:N sources.",
+  }),
+  y1: int({
+    description: "Top edge in pixels of the selected source's coordinate space.",
+  }),
+  x2: int({
+    description: "Right edge in absolute pixels; must be greater than x1.",
+  }),
+  y2: int({
+    description: "Bottom edge in absolute pixels; must be greater than y1.",
+  }),
+  view_width: opt(
+    int({
+      minimum: 1,
+      description:
+        "Optional width of an externally resized view. Supply together with view_height only when using path without a registered source.",
     }),
-    view_width: Type.Optional(
-      Type.Integer({
-        minimum: 1,
-        description:
-          "Optional width of an externally resized view. Supply together with view_height only when using path without a registered source.",
-      }),
-    ),
-    view_height: Type.Optional(
-      Type.Integer({
-        minimum: 1,
-        description: "Optional height paired with view_width.",
-      }),
-    ),
-    profile: Type.Optional(
-      Type.Union([Type.Literal("standard"), Type.Literal("high")], {
-        description:
-          "Output image budget. standard is broadly compatible; high uses the larger Anthropic cookbook budget.",
-      }),
-    ),
-    output_format: Type.Optional(
-      Type.Union([Type.Literal("jpeg"), Type.Literal("png")], {
-        description:
-          "JPEG (default) keeps iterative tool history compact; PNG is useful for tiny text and line art but may be downscaled to fit the byte limit.",
-      }),
-    ),
-  },
-  { additionalProperties: false },
-);
+  ),
+  view_height: opt(
+    int({
+      minimum: 1,
+      description: "Optional height paired with view_width.",
+    }),
+  ),
+  profile: opt(
+    oneOf(["standard", "high"], {
+      description:
+        "Output image budget. standard is broadly compatible; high uses the larger Anthropic cookbook budget.",
+    }),
+  ),
+  output_format: opt(
+    oneOf(["jpeg", "png"], {
+      description:
+        "JPEG (default) keeps iterative tool history compact; PNG is useful for tiny text and line art but may be downscaled to fit the byte limit.",
+    }),
+  ),
+});
 
-type ZoomParams = {
-  source_id?: string;
-  image_index?: number;
-  path?: string;
-  x1: number;
-  y1: number;
-  x2: number;
-  y2: number;
-  view_width?: number;
-  view_height?: number;
-  profile?: ProfileName;
-  output_format?: OutputFormat;
-};
+type ZoomParams = Static<typeof ZoomParameters>;
 
 function positiveIntegerFromEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -742,10 +727,10 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     },
 
     renderCall(args, theme) {
-      const selector =
-        args.source_id ??
-        (args.image_index !== undefined ? `image:${args.image_index}` : args.path ?? "latest image");
-      const region = `(${args.x1},${args.y1})–(${args.x2},${args.y2})`;
+      // Pi 1.5.2 types render arguments with TypeBox's Static, which is unknown for a pi-schema schema.
+      const { source_id, image_index, path, x1, y1, x2, y2 } = args as ZoomParams;
+      const selector = source_id ?? (image_index !== undefined ? `image:${image_index}` : path ?? "latest image");
+      const region = `(${x1},${y1})–(${x2},${y2})`;
       return new Text(
         `${theme.fg("toolTitle", theme.bold("zoom image"))} ${theme.fg("accent", String(selector))} ${theme.fg("muted", region)}`,
         0,

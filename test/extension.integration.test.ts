@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import { join } from "node:path";
+import { type JsonObject, validateToolArguments } from "@earendil-works/pi-ai";
 import sharp from "sharp";
 import imageZoomExtension from "../extensions/image-zoom.ts";
 import { parseZoomContexts } from "../src/context.ts";
@@ -214,4 +215,32 @@ test("calibrates, recursively zooms, intercepts read, and restores branch state"
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test("zoom_image parameters accept, coerce, and reject arguments through Pi's validator", () => {
+  const pi = new MockPi();
+  imageZoomExtension(pi as any);
+  const tool = pi.tools.get("zoom_image");
+  const validate = (args: JsonObject) =>
+    validateToolArguments(tool, { type: "toolCall", id: "call", name: "zoom_image", arguments: args });
+  const box = { x1: 10, y1: 20, x2: 300, y2: 400 };
+
+  assert.deepEqual(validate(box), box);
+  assert.deepEqual(validate({ ...box, path: "a.png", profile: "high", output_format: "png" }), {
+    ...box,
+    path: "a.png",
+    profile: "high",
+    output_format: "png",
+  });
+  assert.deepEqual(validate({ x1: "10", y1: "20", x2: "300", y2: "400", image_index: "3" }), {
+    ...box,
+    image_index: 3,
+  });
+  assert.deepEqual(validate({ ...box, source_id: null, view_width: null, profile: null, output_format: null }), box);
+
+  assert.throws(() => validate({ x1: 1, y1: 2, x2: 3 }), /y2: missing/);
+  assert.throws(() => validate({ ...box, image_index: -1 }), /image_index: expected >= 0/);
+  assert.throws(() => validate({ ...box, profile: "null" }), /profile: expected/);
+  assert.throws(() => validate({ ...box, output_format: "gif" }), /output_format: expected/);
+  assert.throws(() => validate({ ...box, zoom: 2 }), /zoom: unknown field/);
 });

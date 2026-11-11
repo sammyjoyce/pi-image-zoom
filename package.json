@@ -34,20 +34,19 @@
     "pack:check": "npm pack --dry-run"
   },
   "dependencies": {
+    "@earendil-works/pi-schema": "^1.5.0",
     "sharp": ">=0.34.0 <1"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
-    "typebox": "*"
+    "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
     "@earendil-works/pi-ai": "1.5.2",
     "@earendil-works/pi-coding-agent": "1.5.2",
     "@earendil-works/pi-tui": "1.5.2",
     "@types/node": "^22.0.0",
-    "typebox": "*",
     "typescript": "^5.9.0"
   }
 }
