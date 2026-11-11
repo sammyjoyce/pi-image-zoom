@@ -56,6 +56,33 @@ function makeContext(cwd: string, branch: any[] = []) {
   };
 }
 
+async function writeSolidImage(path: string, width: number, height: number, background: string): Promise<void> {
+  await sharp({ create: { width, height, channels: 3, background } }).png().toFile(path);
+}
+
+async function emitImageResult(pi: MockPi, ctx: any, toolName: string, path: string, extra: Record<string, unknown> = {}) {
+  const data = (await readFile(path)).toString("base64");
+  const [result] = await pi.emit(
+    "tool_result",
+    {
+      type: "tool_result",
+      toolCallId: `${toolName}:${path}`,
+      toolName,
+      input: { path },
+      content: [{ type: "image", data, mimeType: "image/png" }],
+      details: undefined,
+      isError: false,
+      ...extra,
+    },
+    ctx,
+  );
+  const text = (result?.content ?? [])
+    .filter((part: any) => part.type === "text")
+    .map((part: any) => part.text)
+    .join("\n");
+  return { result, contexts: parseZoomContexts(text), text };
+}
+
 test("calibrates, recursively zooms, intercepts read, and restores branch state", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-integration-"));
   try {
@@ -243,4 +270,34 @@ test("zoom_image parameters accept, coerce, and reject arguments through Pi's va
   assert.throws(() => validate({ ...box, profile: "null" }), /profile: expected/);
   assert.throws(() => validate({ ...box, output_format: "gif" }), /output_format: expected/);
   assert.throws(() => validate({ ...box, zoom: 2 }), /zoom: unknown field/);
+});
+
+test("read results handled at the same time get separate image ids", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-parallel-"));
+  try {
+    const images = [
+      { path: join(dir, "red.png"), width: 1000, height: 600, background: "#ff0000" },
+      { path: join(dir, "green.png"), width: 800, height: 800, background: "#00ff00" },
+      { path: join(dir, "blue.png"), width: 3000, height: 400, background: "#0000ff" },
+    ];
+    for (const image of images) await writeSolidImage(image.path, image.width, image.height, image.background);
+
+    const pi = new MockPi();
+    imageZoomExtension(pi as any);
+    const ctx = makeContext(dir);
+    const registered = await Promise.all(images.map((image) => emitImageResult(pi, ctx, "read", image.path)));
+    assert.equal(new Set(registered.map(({ contexts }) => contexts[0].sourceId)).size, images.length);
+
+    const tool = pi.tools.get("zoom_image");
+    for (const image of images) {
+      const zoomed = await tool.execute("call", { path: image.path, x1: 0, y1: 0, x2: 100, y2: 100 }, undefined, undefined, ctx);
+      assert.equal(zoomed.details.root.path, image.path);
+      assert.deepEqual(
+        { width: zoomed.details.root.width, height: zoomed.details.root.height },
+        { width: image.width, height: image.height },
+      );
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
