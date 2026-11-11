@@ -131,7 +131,7 @@ test("calibrates, recursively zooms, intercepts read, and restores branch state"
     assert.ok(tool);
     const first = await tool.execute(
       "call-1",
-      { image_index: 0, x1: 650, y1: 140, x2: 1000, y2: 500 },
+      { source_id: "image:0", x1: 650, y1: 140, x2: 1000, y2: 500 },
       undefined,
       undefined,
       ctx,
@@ -259,14 +259,30 @@ test("zoom_image parameters accept, coerce, and reject arguments through Pi's va
     profile: "high",
     output_format: "png",
   });
-  assert.deepEqual(validate({ x1: "10", y1: "20", x2: "300", y2: "400", image_index: "3" }), {
-    ...box,
-    image_index: 3,
-  });
-  assert.deepEqual(validate({ ...box, source_id: null, view_width: null, profile: null, output_format: null }), box);
+  assert.deepEqual(validate({ x1: "10", y1: "20", x2: "300", y2: "400" }), box);
+  assert.deepEqual(validate({ ...box, source_id: null, path: null, profile: null, output_format: null }), box);
 
   assert.throws(() => validate({ x1: 1, y1: 2, x2: 3 }), /y2: missing/);
-  assert.throws(() => validate({ ...box, image_index: -1 }), /image_index: expected >= 0/);
+  assert.throws(() => validate({ ...box, image_index: 0 }), /image_index: unknown field/);
+  assert.deepEqual(validate(tool.prepareArguments({ ...box, image_index: 2 })), { ...box, source_id: "image:2" });
+  assert.deepEqual(validate(tool.prepareArguments({ ...box, image_index: 2, source_id: "image:1" })), {
+    ...box,
+    source_id: "image:1",
+  });
+  assert.deepEqual(validate(tool.prepareArguments({ ...box, image_index: 0, source_id: null })), {
+    ...box,
+    source_id: "image:0",
+  });
+  for (const sent of ["0", " 0 ", "0.0", "0e0", "+0", "-0", 0.4, false]) {
+    assert.deepEqual(validate(tool.prepareArguments({ ...box, image_index: sent })), { ...box, source_id: "image:0" });
+  }
+  assert.throws(() => validate(tool.prepareArguments({ ...box, image_index: "first" })), /image_index: unknown field/);
+  assert.throws(() => validate(tool.prepareArguments({ ...box, image_index: -1 })), /image_index: unknown field/);
+  assert.deepEqual(
+    validate(tool.prepareArguments({ ...box, path: "a.png", image_index: null, view_width: null, view_height: null })),
+    { ...box, path: "a.png" },
+  );
+  assert.throws(() => validate({ ...box, view_width: 800, view_height: 600 }), /view_width: unknown field/);
   assert.throws(() => validate({ ...box, profile: "null" }), /profile: expected/);
   assert.throws(() => validate({ ...box, output_format: "gif" }), /output_format: expected/);
   assert.throws(() => validate({ ...box, zoom: 2 }), /zoom: unknown field/);

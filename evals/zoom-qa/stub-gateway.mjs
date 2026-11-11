@@ -82,7 +82,7 @@ createServer((req, res) => {
         const sx = ctx.view.width / ctx.original.width, sy = ctx.view.height / ctx.original.height;
         const pad = 40;
         const input = {
-          image_index: ctx.imageIndex,
+          source_id: ctx.sourceId,
           x1: Math.max(0, Math.floor((c.target.left - pad) * sx)), y1: Math.max(0, Math.floor((c.target.top - pad) * sy)),
           x2: Math.ceil((c.target.left + c.target.width + pad) * sx), y2: Math.ceil((c.target.top + c.target.height + pad) * sy),
         };
