@@ -298,6 +298,14 @@ function isZoomDetails(value: unknown): value is ZoomDetails {
   );
 }
 
+function describeCrop(details: ZoomDetails): string {
+  const { clampedBox, sourceView, rootCrop, root, output } = details;
+  return [
+    `Zoomed ${details.sourceId} box (${clampedBox.x1},${clampedBox.y1})-(${clampedBox.x2},${clampedBox.y2}) in its ${sourceView.width}x${sourceView.height}px coordinate space.`,
+    `Cropped (${rootCrop.left},${rootCrop.top}) ${rootCrop.width}x${rootCrop.height}px from the ${root.width}x${root.height}px full-resolution root and magnified it to ${output.width}x${output.height}px.`,
+  ].join("\n");
+}
+
 export default function imageZoomExtension(pi: ExtensionAPI): void {
   const config = loadConfig();
   const roots = new Map<string, RootRecord>();
@@ -307,6 +315,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
   // original-pixel boxes when it omits the selector.
   let defaultSourceId: string | undefined;
   const toolImageRootIds: string[] = [];
+  const cropsByParentToolCallId = new Map<string, (TextContent | ImageContent)[]>();
   const releasedToolImageIds = new Set<string>();
   let nextImageIndex = 0;
   let nextZoomIndex = 0;
@@ -323,6 +332,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     pathToSourceId.clear();
     defaultSourceId = undefined;
     toolImageRootIds.length = 0;
+    cropsByParentToolCallId.clear();
     releasedToolImageIds.clear();
     nextImageIndex = 0;
     nextZoomIndex = 0;
@@ -634,9 +644,25 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_result", async (event, ctx) => {
+    const crops = cropsByParentToolCallId.get(event.toolCallId) ?? [];
+    cropsByParentToolCallId.delete(event.toolCallId);
+
+    // A script gets only the text of a crop, so the crop is added to the result of the outermost
+    // call, which the model does see. The text leaves out the zoom:N id, because Pi does not
+    // store a nested result and the id would not survive a session reload.
+    if (event.parentToolCallId) {
+      const [image] = contentImages(event.content);
+      if (event.toolName === TOOL_NAME && !event.isError && image && isZoomDetails(event.details)) {
+        crops.push({ type: "text", text: describeCrop(event.details) }, image);
+      }
+      if (crops.length > 0) {
+        cropsByParentToolCallId.set(event.parentToolCallId, [...(cropsByParentToolCallId.get(event.parentToolCallId) ?? []), ...crops]);
+      }
+      if (event.toolName === "read") await calibrateReadResult(event, ctx);
+      return;
+    }
     if (event.toolName === TOOL_NAME) return;
     if (event.toolName === "read") return calibrateReadResult(event, ctx);
-    if (event.parentToolCallId) return;
 
     // Pi resizes tool images after this handler runs, so these are the tool's full-size bytes.
     const metadata: ZoomContextMetadata[] = [];
@@ -645,9 +671,10 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       const registered = await registerToolImage(images[index]!, index).catch(() => undefined);
       if (registered) metadata.push(registered);
     }
-    if (metadata.length === 0) return;
+    if (metadata.length === 0 && crops.length === 0) return;
+    const context = metadata.length > 0 ? [{ type: "text" as const, text: buildZoomContextBlock(metadata) }] : [];
     return {
-      content: [...event.content, { type: "text" as const, text: buildZoomContextBlock(metadata) }],
+      content: [...event.content, ...context, ...crops],
       structuredContent: event.structuredContent,
     };
   });
@@ -837,8 +864,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       };
 
       const text = [
-        `Zoomed ${source.id} box (${clampedBox.x1},${clampedBox.y1})-(${clampedBox.x2},${clampedBox.y2}) in its ${source.viewWidth}x${source.viewHeight}px coordinate space.`,
-        `Cropped (${rootCrop.left},${rootCrop.top}) ${rootCrop.width}x${rootCrop.height}px from the ${root.width}x${root.height}px full-resolution root and magnified it to ${output.width}x${output.height}px.`,
+        describeCrop(details),
         `For another pass on this crop, use source_id=${JSON.stringify(resultSourceId)} with coordinates in a ${output.width}x${output.height}px space.`,
       ].join("\n");
 
