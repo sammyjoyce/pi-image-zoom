@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, extname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -172,6 +172,12 @@ function withLegacyImageIndex(args: unknown): unknown {
 function withoutPlaceholders(args: unknown): unknown {
   if (!args || typeof args !== "object" || Array.isArray(args)) return args;
   return Object.fromEntries(Object.entries(args).filter(([, value]) => value !== null && value !== "null"));
+}
+
+async function isSameFile(first: string, second: string): Promise<boolean> {
+  if (first === second) return true;
+  const [firstReal, secondReal] = await Promise.all([first, second].map((path) => realpath(path).catch(() => undefined)));
+  return firstReal !== undefined && firstReal === secondReal;
 }
 
 function positiveIntegerFromEnv(name: string, fallback: number): number {
@@ -570,7 +576,8 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
   async function resolveSource(params: ZoomParams, cwd: string): Promise<{ source: SourceRecord; root: RootRecord }> {
     if (params.source_id !== undefined && params.path !== undefined) {
       const named = sources.get(params.source_id);
-      if (named && named.path !== normalizePathArgument(params.path, cwd)) {
+      const namesWholeImage = named?.id === named?.rootId && named?.path !== undefined;
+      if (named && !(namesWholeImage && (await isSameFile(named.path!, normalizePathArgument(params.path, cwd))))) {
         throw new Error(
           `source_id ${JSON.stringify(params.source_id)} and path ${JSON.stringify(params.path)} name different images. Send only one of them.`,
         );

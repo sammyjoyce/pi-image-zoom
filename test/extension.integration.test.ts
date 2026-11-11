@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import { join } from "node:path";
@@ -360,6 +360,16 @@ test("source_id and path may both be sent when they name the same image", async 
 
     const same = await tool.execute("call", { ...box, source_id: contexts[0].sourceId, path: red }, undefined, undefined, ctx);
     assert.equal(same.details.root.path, red);
+
+    const alias = join(dir, "alias.png");
+    await symlink(red, alias);
+    const linked = await tool.execute("call", { ...box, source_id: contexts[0].sourceId, path: alias }, undefined, undefined, ctx);
+    assert.equal(linked.details.root.path, red);
+
+    await assert.rejects(
+      tool.execute("call", { ...box, source_id: same.details.resultSourceId, path: red }, undefined, undefined, ctx),
+      /source_id "zoom:0" and path ".*red\.png" name different images/,
+    );
 
     await assert.rejects(
       tool.execute("call", { ...box, source_id: contexts[0].sourceId, path: green }, undefined, undefined, ctx),
