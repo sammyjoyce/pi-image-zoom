@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { basename, extname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { createReadTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { compile, int, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
 import { Text } from "@earendil-works/pi-tui";
 import {
@@ -231,40 +231,31 @@ function normalizePathArgument(rawPath: string, cwd: string): string {
   return isAbsolute(value) ? resolve(value) : resolve(cwd, value);
 }
 
-const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
-
 const fileExists = (path: string) => stat(path).then(() => true, () => false);
 
 /**
- * pathPiReads copies the resolver of Pi's read tool, because Pi does not export it. Pi turns each
- * character in UNICODE_SPACES into a plain space, keeps outer spaces and quotes, and opens that
- * path if it exists. Pi then tries, in order, a narrow no-break space before AM or PM, the NFD
- * form, a curly apostrophe, and NFD with a curly apostrophe.
+ * The file that Pi's read tool opens for a typed path. Pi does not export its path resolver, and
+ * a copy of it would have to track every rule. The read tool takes replaceable file operations
+ * and hands them the resolved path, so a read that stops at its first operation names the file.
  */
-async function pathPiReads(rawPath: string, cwd: string): Promise<string> {
-  let plain = rawPath.replace(UNICODE_SPACES, " ");
-  if (plain.startsWith("@")) plain = plain.slice(1);
-  if (plain === "~") plain = homedir();
-  else if (plain.startsWith("~/")) plain = resolve(homedir(), plain.slice(2));
-  else if (plain.startsWith("file://")) plain = fileURLToPath(plain);
-  const typed = isAbsolute(plain) ? resolve(plain) : resolve(cwd, plain);
-  const decomposed = typed.normalize("NFD");
-  const candidates = [
-    typed,
-    typed.replace(/ (AM|PM)\./gi, "\u202F$1."),
-    decomposed,
-    typed.replace(/'/g, "\u2019"),
-    decomposed.replace(/'/g, "\u2019"),
-  ];
-  for (const candidate of candidates) {
-    if (await fileExists(candidate)) return candidate;
-  }
-  return typed;
+async function pathPiReads(rawPath: string, cwd: string): Promise<string | undefined> {
+  let opened: string | undefined;
+  const probe = createReadTool(cwd, {
+    operations: {
+      access: async (path) => {
+        opened = path;
+        throw new Error("stop after the path is known");
+      },
+      readFile: async () => Buffer.alloc(0),
+    },
+  });
+  await probe.execute("path-probe", { path: rawPath }).catch(() => undefined);
+  return opened;
 }
 
 async function resolveImagePath(rawPath: string, cwd: string): Promise<string> {
   const exact = normalizePathArgument(rawPath, cwd);
-  return (await fileExists(exact)) ? exact : pathPiReads(rawPath, cwd);
+  return (await fileExists(exact)) ? exact : ((await pathPiReads(rawPath, cwd)) ?? exact);
 }
 
 function isLikelyImagePath(path: string): boolean {

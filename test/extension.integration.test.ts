@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import test from "node:test";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { type JsonObject, validateToolArguments } from "@earendil-works/pi-ai";
 import sharp from "sharp";
 import imageZoomExtension from "../extensions/image-zoom.ts";
@@ -416,6 +416,22 @@ test("a read of a name that starts with a space or sits in quotes registers the 
       imageZoomExtension(pi as any);
       const read = await emitImageResult(pi, makeContext(dir), "read", piReads, { input: { path: typed } });
       assert.equal(read.contexts[0].path, piReads);
+    }
+
+    // Pi joins "~//name" under the home directory. A resolver that treats "/name" as absolute
+    // would look at the root of the disk.
+    const home = await realpath(homedir());
+    const underHome = await mkdtemp(join(home, ".pi-image-zoom-test-"));
+    try {
+      const piReads = join(underHome, "shot 7.00.00 PM.png");
+      await writeSolidImage(piReads, 900, 500, "#ff0000");
+      const typed = `~//${basename(underHome)}/shot 7.00.00 PM.png`;
+      const pi = new MockPi();
+      imageZoomExtension(pi as any);
+      const read = await emitImageResult(pi, makeContext(dir), "read", piReads, { input: { path: typed } });
+      assert.equal(read.contexts[0].path, piReads);
+    } finally {
+      await rm(underHome, { recursive: true, force: true });
     }
   } finally {
     await rm(dir, { recursive: true, force: true });
