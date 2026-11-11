@@ -148,15 +148,21 @@ const ZoomParameters = obj({
 
 type ZoomParams = Static<typeof ZoomParameters>;
 
+const REMOVED_PARAMETERS = new Set(["image_index", "view_width", "view_height"]);
+
 /**
  * A session that started before image_index was removed still shows "image:N (image_index N)"
  * beside each image, so a model can still send it after a resume.
  */
 function withLegacyImageIndex(args: unknown): unknown {
   if (!args || typeof args !== "object" || Array.isArray(args)) return args;
-  const { image_index: imageIndex, ...rest } = args as Record<string, unknown>;
-  if (!Number.isInteger(imageIndex) || (imageIndex as number) < 0) return args;
-  return rest.source_id === undefined ? { ...rest, source_id: `image:${imageIndex}` } : rest;
+  const sent = Object.fromEntries(
+    Object.entries(args).filter(([name, value]) => !(value === null && REMOVED_PARAMETERS.has(name))),
+  );
+  const { image_index: imageIndex, ...rest } = sent;
+  const index = typeof imageIndex === "string" && /^\d+$/.test(imageIndex) ? Number(imageIndex) : imageIndex;
+  if (typeof index !== "number" || !Number.isInteger(index) || index < 0) return sent;
+  return rest.source_id == null ? { ...rest, source_id: `image:${index}` } : rest;
 }
 
 function positiveIntegerFromEnv(name: string, fallback: number): number {
