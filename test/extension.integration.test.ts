@@ -830,6 +830,10 @@ test("the result text states the real scale of the crop", async () => {
     );
     assert.ok(tiny.content[1].data.length < 10_000);
 
+    const unreachable = { ...ctx, model: { inputLimits: { images: { resize: { maxBytes: 300 } } } } };
+    const left = await tool.execute("call", { path, x1: 0, y1: 0, x2: 100, y2: 100 }, undefined, undefined, unreachable);
+    assert.equal(left.content[1].type, "image");
+
     const wideOnly = { ...ctx, model: { inputLimits: { images: { resize: { maxWidth: 1800, maxHeight: 400 } } } } };
     const strip = await tool.execute("call", { path: big, x1: 0, y1: 0, x2: 1600, y2: 200 }, undefined, undefined, wideOnly);
     assert.deepEqual({ width: strip.details.output.width, height: strip.details.output.height }, { width: 1568, height: 196 });
