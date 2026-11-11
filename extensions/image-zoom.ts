@@ -42,6 +42,7 @@ const TOOL_NAME = "zoom_image";
 const DETAILS_KIND = "pi-image-zoom-v1";
 const MAX_IN_MEMORY_TOOL_IMAGES = 8;
 const PI_DEFAULT_MAX_IMAGE_EDGE = 2000;
+const PI_DEFAULT_MAX_IMAGE_BASE64_BYTES = 4.5 * 1024 * 1024;
 const IMAGE_EXTENSIONS = new Set([
   ".avif",
   ".bmp",
@@ -851,8 +852,9 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       const profileName = params.profile ?? config.profile;
       const format = params.output_format ?? "jpeg";
       const input = root.input.kind === "path" ? root.input.path : Buffer.from(root.input.data, "base64");
-      // Pi resizes this result after the tool returns. A crop above Pi's limit would reach the
-      // model smaller than the size this result reports.
+      // Pi resizes this result after the tool returns, unless the image is within the edge
+      // limits and under the byte limit. A crop beyond them would reach the model smaller than
+      // the size this result reports.
       const piLimit = ctx?.model?.inputLimits?.images?.resize;
       const profile = IMAGE_PROFILES[profileName];
       const maxEdge = Math.min(
@@ -860,7 +862,14 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
         piLimit?.maxWidth ?? PI_DEFAULT_MAX_IMAGE_EDGE,
         piLimit?.maxHeight ?? PI_DEFAULT_MAX_IMAGE_EDGE,
       );
-      const output = await cropAndMagnify(input, rootCrop, { ...profile, maxEdge }, format, encodeOptions(signal));
+      const maxBase64Bytes = Math.min(
+        config.maxBase64Bytes,
+        (piLimit?.maxBytes ?? PI_DEFAULT_MAX_IMAGE_BASE64_BYTES) - 1,
+      );
+      const output = await cropAndMagnify(input, rootCrop, { ...profile, maxEdge }, format, {
+        ...encodeOptions(signal),
+        maxBase64Bytes,
+      });
 
       const resultSourceId = `zoom:${nextZoomIndex++}`;
       addDerivedSource({

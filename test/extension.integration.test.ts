@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import test from "node:test";
@@ -810,6 +811,15 @@ test("the result text states the real scale of the crop", async () => {
     const roomy = { ...ctx, model: { inputLimits: { images: { resize: { maxWidth: 4000, maxHeight: 4000 } } } } };
     const highWithRoom = await tool.execute("call", highBox, undefined, undefined, roomy);
     assert.equal(highWithRoom.details.output.width, IMAGE_PROFILES.high.maxEdge);
+
+    const noisy = join(dir, "noisy.png");
+    await sharp(randomBytes(1200 * 1200 * 3), { raw: { width: 1200, height: 1200, channels: 3 } })
+      .png()
+      .toFile(noisy);
+    const tight = { ...ctx, model: { inputLimits: { images: { resize: { maxBytes: 100_000 } } } } };
+    const small = await tool.execute("call", { path: noisy, x1: 0, y1: 0, x2: 1092, y2: 1092 }, undefined, undefined, tight);
+    assert.ok(small.content[1].data.length < 100_000);
+    assert.match(small.content[0].text, /reduced it to 0\.\d\dx/);
 
     const clipped = await textOf({ x1: 2800, y1: 300, x2: 3600, y2: 500 });
     assert.match(clipped, /The requested box \(2800,300\)-\(3600,500\) extends past the 3000x400px image and was clipped\./);
