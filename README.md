@@ -137,6 +137,17 @@ For `@file`, drag/drop paths, and images loaded through Pi's `read` tool, the ex
 
 Clipboard-only images have no durable source path. The extension uses the calibrated image Pi received as their root so coordinates and resumed sessions stay deterministic; it cannot recover pixels that were already discarded before the extension received the attachment.
 
+## Known limits
+
+- **Images inside a script.** An image that a tool returns to a codemode script becomes a zoom source only when the script shows it with `image()`. A `read` inside a script is the exception: its file is registered at once.
+- **Crop ids from a script.** A crop made inside a script works as `zoom:N` for the rest of the session. Pi does not store results of calls that a script makes, so after a session reload that id is gone, and a later crop can take the same number.
+- **Very small image limits.** A crop is fitted to the width, height, and byte limits of the active model, so the size in the result text is the size the model receives. When the byte limit is below what the encoder can reach in the requested format, Pi fits the crop after the tool returns, and the size in the text can be larger than the picture.
+- **Model behavior.** The `zoom-qa` eval was last run before the changes to the result text and the tool schema.
+
+## Upgrading from 0.1.0 as first published
+
+`zoom_image` no longer accepts `view_width` and `view_height`. `image_index` is not in the schema, and a call that still sends it is mapped to `source_id` `image:N`, so a session that started on the old version keeps working. Select an image with `source_id` or `path`.
+
 ## Development
 
 Use Node.js 22.19 or newer, matching current Pi releases.
