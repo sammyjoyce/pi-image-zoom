@@ -5,7 +5,7 @@ import { basename, extname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { int, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
+import { compile, int, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
 import { Text } from "@earendil-works/pi-tui";
 import {
   buildZoomContextBlock,
@@ -149,20 +149,23 @@ const ZoomParameters = obj({
 type ZoomParams = Static<typeof ZoomParameters>;
 
 const REMOVED_PARAMETERS = new Set(["image_index", "view_width", "view_height"]);
+const legacyImageIndex = compile(int({ minimum: 0 }), { coerce: true });
 
 /**
  * A session that started before image_index was removed still shows "image:N (image_index N)"
- * beside each image, so a model can still send it after a resume.
+ * beside each image, so a model can still send it after a resume. The removed schema coerces the
+ * value exactly as Pi did then.
  */
 function withLegacyImageIndex(args: unknown): unknown {
   if (!args || typeof args !== "object" || Array.isArray(args)) return args;
   const sent = Object.fromEntries(
     Object.entries(args).filter(([name, value]) => !(value === null && REMOVED_PARAMETERS.has(name))),
   );
+  if (!("image_index" in sent)) return sent;
   const { image_index: imageIndex, ...rest } = sent;
-  const index = typeof imageIndex === "string" && /^\d+$/.test(imageIndex) ? Number(imageIndex) : imageIndex;
-  if (typeof index !== "number" || !Number.isInteger(index) || index < 0) return sent;
-  return rest.source_id == null ? { ...rest, source_id: `image:${index}` } : rest;
+  const index = legacyImageIndex.parse(imageIndex);
+  if (!index.ok) return sent;
+  return rest.source_id == null ? { ...rest, source_id: `image:${index.value}` } : rest;
 }
 
 function positiveIntegerFromEnv(name: string, fallback: number): number {
