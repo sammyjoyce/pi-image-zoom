@@ -466,3 +466,28 @@ test("a macOS screenshot name typed with a plain space resolves to the file", as
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("a read made by another tool keeps its result", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-nested-"));
+  try {
+    const path = join(dir, "red.png");
+    await writeSolidImage(path, 1000, 600, "#ff0000");
+    const pi = new MockPi();
+    imageZoomExtension(pi as any);
+
+    const ctx = makeContext(dir);
+    const { result } = await emitImageResult(pi, ctx, "read", path, {
+      toolCallId: "script-1/1",
+      parentToolCallId: "script-1",
+      structuredContent: { type: "image", mimeType: "image/png" },
+    });
+    assert.equal(result, undefined);
+
+    const zoomed = await pi.tools
+      .get("zoom_image")
+      .execute("call", { x1: 0, y1: 0, x2: 100, y2: 100 }, undefined, undefined, ctx);
+    assert.equal(zoomed.details.root.path, path);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
