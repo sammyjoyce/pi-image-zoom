@@ -13,7 +13,7 @@ Every prompt is `@<image> <question>` followed by the same answer-format line:
 | ui | 6 | 3200×2000 settings screen, 60 toggles with 8px labels, 9px build string |
 | diagram | 6 | 3600×3600 network, 70 nodes with 10px codes, one red edge to trace |
 | label | 5 | 4000×3000 cluttered photo, 5–6 small stickers; one headed SERIAL, the rest decoys |
-| multi-image | 3 | two images attached, question is about the second (tests image_index routing) |
+| multi-image | 3 | two images attached, question is about the second (tests selecting an image by source_id) |
 | easy | 4 | 190px banner word; answerable without zooming (measures needless zoom calls and cost) |
 | absent | 4 | the thing asked about is not in the image (near-miss setting name, missing series, column AH of a 30-column sheet, no SERIAL sticker); correct answer is NOT FOUND |
 

@@ -264,6 +264,11 @@ test("zoom_image parameters accept, coerce, and reject arguments through Pi's va
 
   assert.throws(() => validate({ x1: 1, y1: 2, x2: 3 }), /y2: missing/);
   assert.throws(() => validate({ ...box, image_index: 0 }), /image_index: unknown field/);
+  assert.deepEqual(validate(tool.prepareArguments({ ...box, image_index: 2 })), { ...box, source_id: "image:2" });
+  assert.deepEqual(validate(tool.prepareArguments({ ...box, image_index: 2, source_id: "image:1" })), {
+    ...box,
+    source_id: "image:1",
+  });
   assert.throws(() => validate({ ...box, view_width: 800, view_height: 600 }), /view_width: unknown field/);
   assert.throws(() => validate({ ...box, profile: "null" }), /profile: expected/);
   assert.throws(() => validate({ ...box, output_format: "gif" }), /output_format: expected/);

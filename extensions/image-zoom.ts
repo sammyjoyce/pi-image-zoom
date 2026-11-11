@@ -148,6 +148,17 @@ const ZoomParameters = obj({
 
 type ZoomParams = Static<typeof ZoomParameters>;
 
+/**
+ * A session that started before image_index was removed still shows "image:N (image_index N)"
+ * beside each image, so a model can still send it after a resume.
+ */
+function withLegacyImageIndex(args: unknown): unknown {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return args;
+  const { image_index: imageIndex, ...rest } = args as Record<string, unknown>;
+  if (!Number.isInteger(imageIndex) || (imageIndex as number) < 0) return args;
+  return rest.source_id === undefined ? { ...rest, source_id: `image:${imageIndex}` } : rest;
+}
+
 function positiveIntegerFromEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -605,6 +616,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       "Prefer JPEG for normal iterative inspection and PNG when tiny text or one-pixel line work needs lossless rendering.",
     ],
     parameters: ZoomParameters,
+    prepareArguments: withLegacyImageIndex,
 
     async execute(_toolCallId, params: ZoomParams, signal, _onUpdate, ctx) {
       const cwd = ctx?.cwd ?? process.cwd();
