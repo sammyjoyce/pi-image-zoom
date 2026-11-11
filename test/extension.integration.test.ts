@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import { join } from "node:path";
@@ -380,6 +380,27 @@ test("source_id and path may both be sent when they name the same image", async 
   }
 });
 
+test("a read of a path with a narrow space in a folder name registers the file Pi opened", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-folder-"));
+  try {
+    const plainDir = join(dir, "shots here");
+    const narrowDir = join(dir, "shots\u202Fhere");
+    await mkdir(plainDir);
+    await mkdir(narrowDir);
+    const piReads = join(plainDir, "capture 1 PM.png");
+    await writeSolidImage(piReads, 900, 500, "#ff0000");
+    await writeSolidImage(join(narrowDir, "capture 1\u202FPM.png"), 700, 300, "#0000ff");
+
+    const pi = new MockPi();
+    imageZoomExtension(pi as any);
+    const typed = join(narrowDir, "capture 1 PM.png");
+    const read = await emitImageResult(pi, makeContext(dir), "read", piReads, { input: { path: typed } });
+    assert.equal(read.contexts[0].path, piReads);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("a macOS screenshot name typed with a plain space resolves to the file", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-screenshot-"));
   try {
@@ -401,6 +422,9 @@ test("a macOS screenshot name typed with a plain space resolves to the file", as
     const [context] = contexts;
     assert.equal(context.path, onDisk);
     assert.deepEqual(context.original, { width: 3000, height: 1600 });
+
+    const exact = await tool.execute("call", { path: onDisk, x1: 0, y1: 0, x2: 100, y2: 100 }, undefined, undefined, ctx);
+    assert.equal(exact.details.root.path, onDisk);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

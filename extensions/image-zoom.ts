@@ -231,16 +231,35 @@ function normalizePathArgument(rawPath: string, cwd: string): string {
   return isAbsolute(value) ? resolve(value) : resolve(cwd, value);
 }
 
+const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+
+const fileExists = (path: string) => stat(path).then(() => true, () => false);
+
 /**
- * macOS writes a narrow no-break space before AM or PM in screenshot names, and a model types a
- * plain space. Pi's read tool tries the same variant.
+ * pathPiReads copies the fallback names that Pi's read tool tries, because Pi does not export
+ * its resolver. Pi turns each character in UNICODE_SPACES into a plain space and opens that path
+ * if it exists. Pi then tries, in order, a narrow no-break space before AM or PM, the NFD form,
+ * a curly apostrophe, and NFD with a curly apostrophe.
  */
+async function pathPiReads(rawPath: string, cwd: string): Promise<string> {
+  const typed = normalizePathArgument(rawPath.replace(UNICODE_SPACES, " "), cwd);
+  const decomposed = typed.normalize("NFD");
+  const candidates = [
+    typed,
+    typed.replace(/ (AM|PM)\./gi, "\u202F$1."),
+    decomposed,
+    typed.replace(/'/g, "\u2019"),
+    decomposed.replace(/'/g, "\u2019"),
+  ];
+  for (const candidate of candidates) {
+    if (await fileExists(candidate)) return candidate;
+  }
+  return typed;
+}
+
 async function resolveImagePath(rawPath: string, cwd: string): Promise<string> {
-  const path = normalizePathArgument(rawPath, cwd);
-  const screenshotPath = path.replace(/ (AM|PM)\./gi, "\u202F$1.");
-  if (screenshotPath === path) return path;
-  const exists = (candidate: string) => stat(candidate).then(() => true, () => false);
-  return !(await exists(path)) && (await exists(screenshotPath)) ? screenshotPath : path;
+  const exact = normalizePathArgument(rawPath, cwd);
+  return (await fileExists(exact)) ? exact : pathPiReads(rawPath, cwd);
 }
 
 function isLikelyImagePath(path: string): boolean {
@@ -567,7 +586,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     if (!rawPath) return;
 
     try {
-      const path = await resolveImagePath(rawPath, ctx.cwd);
+      const path = await pathPiReads(rawPath, ctx.cwd);
       const registered = await registerIncomingImage(image, path, "read", contentImageIndex, ctx.signal);
       const content = event.content.map((part: TextContent | ImageContent, index: number) => {
         if (index === imageContentIndex) return registered.image;
