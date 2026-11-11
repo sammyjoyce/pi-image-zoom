@@ -236,13 +236,18 @@ const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 const fileExists = (path: string) => stat(path).then(() => true, () => false);
 
 /**
- * pathPiReads copies the fallback names that Pi's read tool tries, because Pi does not export
- * its resolver. Pi turns each character in UNICODE_SPACES into a plain space and opens that path
- * if it exists. Pi then tries, in order, a narrow no-break space before AM or PM, the NFD form,
- * a curly apostrophe, and NFD with a curly apostrophe.
+ * pathPiReads copies the resolver of Pi's read tool, because Pi does not export it. Pi turns each
+ * character in UNICODE_SPACES into a plain space, keeps outer spaces and quotes, and opens that
+ * path if it exists. Pi then tries, in order, a narrow no-break space before AM or PM, the NFD
+ * form, a curly apostrophe, and NFD with a curly apostrophe.
  */
 async function pathPiReads(rawPath: string, cwd: string): Promise<string> {
-  const typed = normalizePathArgument(rawPath.replace(UNICODE_SPACES, " "), cwd);
+  let plain = rawPath.replace(UNICODE_SPACES, " ");
+  if (plain.startsWith("@")) plain = plain.slice(1);
+  if (plain === "~") plain = homedir();
+  else if (plain.startsWith("~/")) plain = resolve(homedir(), plain.slice(2));
+  else if (plain.startsWith("file://")) plain = fileURLToPath(plain);
+  const typed = isAbsolute(plain) ? resolve(plain) : resolve(cwd, plain);
   const decomposed = typed.normalize("NFD");
   const candidates = [
     typed,

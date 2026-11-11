@@ -401,6 +401,27 @@ test("a read of a path with a narrow space in a folder name registers the file P
   }
 });
 
+test("a read of a name that starts with a space or sits in quotes registers the file Pi opened", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-literal-"));
+  try {
+    const cases = [
+      { typed: " Screenshot 5.00.00 PM.png", neighbour: "Screenshot 5.00.00\u202FPM.png" },
+      { typed: "'Screenshot 6.00.00 PM.png'", neighbour: "Screenshot 6.00.00\u202FPM.png" },
+    ];
+    for (const { typed, neighbour } of cases) {
+      const piReads = join(dir, typed);
+      await writeSolidImage(piReads, 900, 500, "#ff0000");
+      await writeSolidImage(join(dir, neighbour), 700, 300, "#0000ff");
+      const pi = new MockPi();
+      imageZoomExtension(pi as any);
+      const read = await emitImageResult(pi, makeContext(dir), "read", piReads, { input: { path: typed } });
+      assert.equal(read.contexts[0].path, piReads);
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("a macOS screenshot name typed with a plain space resolves to the file", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-screenshot-"));
   try {
