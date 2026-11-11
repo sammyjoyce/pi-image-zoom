@@ -712,3 +712,45 @@ test("an image id restored from a crop is not given to a new image", async () =>
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("a crop made inside a script is added to the script's result", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-script-"));
+  try {
+    const path = join(dir, "page.png");
+    await writeSolidImage(path, 1000, 600, "#ff0000");
+    const pi = new MockPi();
+    imageZoomExtension(pi as any);
+    const ctx = makeContext(dir);
+    const tool = pi.tools.get("zoom_image");
+    const emitResult = async (event: Record<string, unknown>) =>
+      (await pi.emit("tool_result", { type: "tool_result", input: {}, details: undefined, isError: false, ...event }, ctx))[0];
+    const script = [{ type: "text", text: "Script completed" }];
+
+    const crop = await tool.execute("script-1/1", { path, x1: 0, y1: 0, x2: 200, y2: 100 }, undefined, undefined, ctx);
+    const nested = { toolName: "zoom_image", content: crop.content, details: crop.details };
+    assert.equal(await emitResult({ ...nested, toolCallId: "script-1/1", parentToolCallId: "script-1" }), undefined);
+    await emitResult({
+      toolName: "zoom_image",
+      toolCallId: "script-1/2",
+      parentToolCallId: "script-1",
+      content: [{ type: "text", text: "Invalid region" }],
+      isError: true,
+    });
+
+    const result = await emitResult({ toolName: "codemode", toolCallId: "script-1", content: script });
+    assert.deepEqual(result.content[0], script[0]);
+    assert.deepEqual(
+      result.content.slice(1).map((part: any) => part.type),
+      ["text", "image"],
+    );
+    assert.match(result.content[1].text, /^Zoomed \S+ box \(0,0\)-\(200,100\)/);
+    assert.doesNotMatch(result.content[1].text, /zoom:\d/);
+    assert.equal(result.content[2].data, crop.content[1].data);
+    assert.equal(parseZoomContexts(result.content[1].text).length, 0);
+
+    assert.equal(await emitResult({ ...nested, toolCallId: "direct-1" }), undefined);
+    assert.equal(await emitResult({ toolName: "codemode", toolCallId: "script-2", content: script }), undefined);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
