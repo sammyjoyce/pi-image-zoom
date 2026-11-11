@@ -7,6 +7,8 @@ import { type JsonObject, validateToolArguments } from "@earendil-works/pi-ai";
 import sharp from "sharp";
 import imageZoomExtension from "../extensions/image-zoom.ts";
 import { parseZoomContexts } from "../src/context.ts";
+import { IMAGE_PATCH_SIZE } from "../src/geometry.ts";
+import { IMAGE_PROFILES } from "../src/image.ts";
 
 class MockPi {
   handlers = new Map<string, Array<(event: any, ctx: any) => any>>();
@@ -799,6 +801,15 @@ test("the result text states the real scale of the crop", async () => {
     await writeSolidImage(tall, 40, 2320, "#00ff00");
     const column = await tool.execute("call", { path: tall, x1: 0, y1: 0, x2: 1, y2: 2320 }, undefined, undefined, ctx);
     assert.match(column.content[0].text, /reduced it to 0\.67x \(1x1568px\)/);
+
+    const big = join(dir, "big.png");
+    await writeSolidImage(big, 6000, 800, "#ff00ff");
+    const highBox = { path: big, x1: 0, y1: 0, x2: 6000, y2: 800, profile: "high" };
+    const high = await tool.execute("call", highBox, undefined, undefined, ctx);
+    assert.equal(high.details.output.width, Math.floor(2000 / IMAGE_PATCH_SIZE) * IMAGE_PATCH_SIZE);
+    const roomy = { ...ctx, model: { inputLimits: { images: { resize: { maxWidth: 4000, maxHeight: 4000 } } } } };
+    const highWithRoom = await tool.execute("call", highBox, undefined, undefined, roomy);
+    assert.equal(highWithRoom.details.output.width, IMAGE_PROFILES.high.maxEdge);
 
     const clipped = await textOf({ x1: 2800, y1: 300, x2: 3600, y2: 500 });
     assert.match(clipped, /The requested box \(2800,300\)-\(3600,500\) extends past the 3000x400px image and was clipped\./);

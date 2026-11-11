@@ -41,6 +41,7 @@ import {
 const TOOL_NAME = "zoom_image";
 const DETAILS_KIND = "pi-image-zoom-v1";
 const MAX_IN_MEMORY_TOOL_IMAGES = 8;
+const PI_DEFAULT_MAX_IMAGE_EDGE = 2000;
 const IMAGE_EXTENSIONS = new Set([
   ".avif",
   ".bmp",
@@ -319,9 +320,8 @@ function describeCrop(details: ZoomDetails): string {
   const size = `${output.width}x${output.height}px`;
   const scale = Math.min(output.width / rootCrop.width, output.height / rootCrop.height);
   if (scale < 1) {
-    // Rounded down, so a crop that lost any pixels never reads as 1.00x.
-    const shown = (Math.floor(scale * 100) / 100).toFixed(2);
-    lines.push(`${cropped} and reduced it to ${shown}x (${size}) to fit the image budget. Crop a smaller box to see it at full resolution.`);
+    const scaleRoundedDown = (Math.floor(scale * 100) / 100).toFixed(2);
+    lines.push(`${cropped} and reduced it to ${scaleRoundedDown}x (${size}) to fit the image budget. Crop a smaller box to see it at full resolution.`);
   } else if (scale < 1.005) {
     lines.push(`${cropped} and returned it at full resolution (${size}).`);
   } else {
@@ -851,13 +851,16 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       const profileName = params.profile ?? config.profile;
       const format = params.output_format ?? "jpeg";
       const input = root.input.kind === "path" ? root.input.path : Buffer.from(root.input.data, "base64");
-      const output = await cropAndMagnify(
-        input,
-        rootCrop,
-        IMAGE_PROFILES[profileName],
-        format,
-        encodeOptions(signal),
+      // Pi resizes this result after the tool returns. A crop above Pi's limit would reach the
+      // model smaller than the size this result reports.
+      const piLimit = ctx?.model?.inputLimits?.images?.resize;
+      const profile = IMAGE_PROFILES[profileName];
+      const maxEdge = Math.min(
+        profile.maxEdge,
+        piLimit?.maxWidth ?? PI_DEFAULT_MAX_IMAGE_EDGE,
+        piLimit?.maxHeight ?? PI_DEFAULT_MAX_IMAGE_EDGE,
       );
+      const output = await cropAndMagnify(input, rootCrop, { ...profile, maxEdge }, format, encodeOptions(signal));
 
       const resultSourceId = `zoom:${nextZoomIndex++}`;
       addDerivedSource({
