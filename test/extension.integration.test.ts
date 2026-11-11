@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import test from "node:test";
@@ -7,6 +8,7 @@ import { type JsonObject, validateToolArguments } from "@earendil-works/pi-ai";
 import sharp from "sharp";
 import imageZoomExtension from "../extensions/image-zoom.ts";
 import { parseZoomContexts } from "../src/context.ts";
+import { IMAGE_PROFILES } from "../src/image.ts";
 
 class MockPi {
   handlers = new Map<string, Array<(event: any, ctx: any) => any>>();
@@ -770,6 +772,74 @@ test("a crop made inside a script is added to the script's result", async () => 
     await emitResult({ ...nested, toolCallId: "relay-1/1", parentToolCallId: "relay-1" });
     const relayed = await emitResult({ toolName: "relay", toolCallId: "relay-1", content: crop.content });
     assert.equal(relayed.content.filter((part: any) => part.type === "image").length, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("the result text states the real scale of the crop", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-scale-"));
+  try {
+    const path = join(dir, "wide.png");
+    await writeSolidImage(path, 3000, 400, "#0000ff");
+    const pi = new MockPi();
+    imageZoomExtension(pi as any);
+    const ctx = makeContext(dir);
+    const tool = pi.tools.get("zoom_image");
+    const textOf = async (box: Record<string, number>) =>
+      (await tool.execute("call", { path, ...box }, undefined, undefined, ctx)).content[0].text;
+
+    const reduced = await textOf({ x1: 0, y1: 0, x2: 3000, y2: 400 });
+    assert.match(reduced, /reduced it to 0\.52x \(1568x209px\) to fit the image budget\. Crop a smaller box/);
+    assert.doesNotMatch(reduced, /magnified/);
+    assert.match(await textOf({ x1: 0, y1: 0, x2: 1574, y2: 400 }), /reduced it to 0\.99x \(1568x398px\)/);
+
+    assert.match(await textOf({ x1: 100, y1: 100, x2: 300, y2: 200 }), /magnified it 2\.00x to 400x200px/);
+    assert.match(await textOf({ x1: 0, y1: 0, x2: 1568, y2: 400 }), /returned it at full resolution \(1568x400px\)/);
+
+    const tall = join(dir, "tall.png");
+    await writeSolidImage(tall, 40, 2320, "#00ff00");
+    const column = await tool.execute("call", { path: tall, x1: 0, y1: 0, x2: 1, y2: 2320 }, undefined, undefined, ctx);
+    assert.match(column.content[0].text, /reduced it to 0\.67x \(1x1568px\)/);
+
+    const big = join(dir, "big.png");
+    await writeSolidImage(big, 6000, 800, "#ff00ff");
+    const highBox = { path: big, x1: 0, y1: 0, x2: 6000, y2: 800, profile: "high" };
+    const high = await tool.execute("call", highBox, undefined, undefined, ctx);
+    assert.equal(high.details.output.width, 2000);
+    const roomy = { ...ctx, model: { inputLimits: { images: { resize: { maxWidth: 4000, maxHeight: 4000 } } } } };
+    const highWithRoom = await tool.execute("call", highBox, undefined, undefined, roomy);
+    assert.equal(highWithRoom.details.output.width, IMAGE_PROFILES.high.maxEdge);
+
+    const noisy = join(dir, "noisy.png");
+    await sharp(randomBytes(1200 * 1200 * 3), { raw: { width: 1200, height: 1200, channels: 3 } })
+      .png()
+      .toFile(noisy);
+    const tight = { ...ctx, model: { inputLimits: { images: { resize: { maxBytes: 100_000 } } } } };
+    const small = await tool.execute("call", { path: noisy, x1: 0, y1: 0, x2: 1092, y2: 1092 }, undefined, undefined, tight);
+    assert.ok(small.content[1].data.length < 100_000);
+    assert.match(small.content[0].text, /reduced it to 0\.\d\dx/);
+
+    const tighter = { ...ctx, model: { inputLimits: { images: { resize: { maxBytes: 10_000 } } } } };
+    const tiny = await tool.execute(
+      "call",
+      { path: noisy, x1: 0, y1: 0, x2: 1200, y2: 1200, output_format: "png" },
+      undefined,
+      undefined,
+      tighter,
+    );
+    assert.ok(tiny.content[1].data.length < 10_000);
+
+    const unreachable = { ...ctx, model: { inputLimits: { images: { resize: { maxBytes: 300 } } } } };
+    const left = await tool.execute("call", { path, x1: 0, y1: 0, x2: 100, y2: 100 }, undefined, undefined, unreachable);
+    assert.equal(left.content[1].type, "image");
+
+    const wideOnly = { ...ctx, model: { inputLimits: { images: { resize: { maxWidth: 1800, maxHeight: 400 } } } } };
+    const strip = await tool.execute("call", { path: big, x1: 0, y1: 0, x2: 1600, y2: 200 }, undefined, undefined, wideOnly);
+    assert.deepEqual({ width: strip.details.output.width, height: strip.details.output.height }, { width: 1568, height: 196 });
+
+    const clipped = await textOf({ x1: 2800, y1: 300, x2: 3600, y2: 500 });
+    assert.match(clipped, /The requested box \(2800,300\)-\(3600,500\) extends past the 3000x400px image and was clipped\./);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

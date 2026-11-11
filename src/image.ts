@@ -1,6 +1,6 @@
 import sharp, { type Metadata } from "sharp";
 import type { Dimensions, ImageBudget, PixelBox } from "./geometry.ts";
-import { resizedSize, zoomSize } from "./geometry.ts";
+import { fitWithin, resizedSize, zoomSize } from "./geometry.ts";
 
 export type ImageInput = Buffer | string;
 export type OutputFormat = "jpeg" | "png";
@@ -28,6 +28,8 @@ export interface PreparedOverview extends EncodedImage {
 
 export interface EncodeOptions {
   maxBase64Bytes: number;
+  /** The largest output in each direction, when the caller has a limit beyond the profile. */
+  maxSize?: Dimensions;
   jpegQuality: number;
   signal?: AbortSignal;
 }
@@ -156,21 +158,28 @@ async function renderWithinBudget(
 ): Promise<EncodedImage> {
   let target = initialTarget;
 
-  for (let attempt = 0; attempt < 16; attempt++) {
+  for (;;) {
     const raw = await renderRaw(input, target, extract, options.signal);
     const qualities = format === "jpeg" ? qualitySteps(options.jpegQuality) : [options.jpegQuality];
 
+    let smallestBytes = Number.POSITIVE_INFINITY;
     for (const quality of qualities) {
       throwIfAborted(options.signal);
       const encoded = await encodeRaw(raw, format, quality);
       if (encoded.base64Bytes <= options.maxBase64Bytes) {
         return encoded;
       }
+      smallestBytes = Math.min(smallestBytes, encoded.base64Bytes);
     }
 
-    const smaller = nextSmallerSize(target);
-    if (smaller.width === target.width && smaller.height === target.height) break;
-    target = smaller;
+    if (target.width === 1 && target.height === 1) break;
+    // The encoded size follows the pixel count, so each edge shrinks by the square root of the
+    // overshoot. A fixed step can run out of attempts before a small byte limit is met.
+    const edgeScale = Math.min(0.85, Math.sqrt(options.maxBase64Bytes / smallestBytes));
+    target = {
+      width: Math.max(1, Math.floor(target.width * edgeScale)),
+      height: Math.max(1, Math.floor(target.height * edgeScale)),
+    };
   }
 
   throw new Error(`Could not encode image below ${options.maxBase64Bytes} base64 bytes`);
@@ -208,6 +217,6 @@ export async function cropAndMagnify(
   format: OutputFormat,
   options: EncodeOptions,
 ): Promise<EncodedImage> {
-  const target = zoomSize(crop.width, crop.height, profile);
+  const target = fitWithin(zoomSize(crop.width, crop.height, profile), options.maxSize);
   return renderWithinBudget(input, target, crop, format, options);
 }

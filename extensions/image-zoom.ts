@@ -41,6 +41,8 @@ import {
 const TOOL_NAME = "zoom_image";
 const DETAILS_KIND = "pi-image-zoom-v1";
 const MAX_IN_MEMORY_TOOL_IMAGES = 8;
+const PI_DEFAULT_MAX_IMAGE_EDGE = 2000;
+const PI_DEFAULT_MAX_IMAGE_BASE64_BYTES = 4.5 * 1024 * 1024;
 const IMAGE_EXTENSIONS = new Set([
   ".avif",
   ".bmp",
@@ -304,11 +306,29 @@ function isZoomDetails(value: unknown): value is ZoomDetails {
 }
 
 function describeCrop(details: ZoomDetails): string {
-  const { clampedBox, sourceView, rootCrop, root, output } = details;
-  return [
+  const { requestedBox, clampedBox, sourceView, rootCrop, root, output } = details;
+  const lines: string[] = [];
+  if ((["x1", "y1", "x2", "y2"] as const).some((edge) => requestedBox[edge] !== clampedBox[edge])) {
+    lines.push(
+      `The requested box (${requestedBox.x1},${requestedBox.y1})-(${requestedBox.x2},${requestedBox.y2}) extends past the ${sourceView.width}x${sourceView.height}px image and was clipped.`,
+    );
+  }
+  lines.push(
     `Zoomed ${details.sourceId} box (${clampedBox.x1},${clampedBox.y1})-(${clampedBox.x2},${clampedBox.y2}) in its ${sourceView.width}x${sourceView.height}px coordinate space.`,
-    `Cropped (${rootCrop.left},${rootCrop.top}) ${rootCrop.width}x${rootCrop.height}px from the ${root.width}x${root.height}px full-resolution root and magnified it to ${output.width}x${output.height}px.`,
-  ].join("\n");
+  );
+
+  const cropped = `Cropped (${rootCrop.left},${rootCrop.top}) ${rootCrop.width}x${rootCrop.height}px from the ${root.width}x${root.height}px full-resolution root`;
+  const size = `${output.width}x${output.height}px`;
+  const scale = Math.min(output.width / rootCrop.width, output.height / rootCrop.height);
+  if (scale < 1) {
+    const scaleRoundedDown = (Math.floor(scale * 100) / 100).toFixed(2);
+    lines.push(`${cropped} and reduced it to ${scaleRoundedDown}x (${size}) to fit the image budget. Crop a smaller box to see it at full resolution.`);
+  } else if (scale < 1.005) {
+    lines.push(`${cropped} and returned it at full resolution (${size}).`);
+  } else {
+    lines.push(`${cropped} and magnified it ${scale.toFixed(2)}x to ${size}.`);
+  }
+  return lines.join("\n");
 }
 
 export default function imageZoomExtension(pi: ExtensionAPI): void {
@@ -832,12 +852,29 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       const profileName = params.profile ?? config.profile;
       const format = params.output_format ?? "jpeg";
       const input = root.input.kind === "path" ? root.input.path : Buffer.from(root.input.data, "base64");
-      const output = await cropAndMagnify(
-        input,
-        rootCrop,
-        IMAGE_PROFILES[profileName],
-        format,
-        encodeOptions(signal),
+      // Pi resizes this result after the tool returns, unless the image is within the edge
+      // limits and under the byte limit. A crop beyond them would reach the model smaller than
+      // the size this result reports.
+      const piLimit = ctx?.model?.inputLimits?.images?.resize;
+      const withinPiSize = {
+        ...encodeOptions(signal),
+        maxSize: {
+          width: piLimit?.maxWidth ?? PI_DEFAULT_MAX_IMAGE_EDGE,
+          height: piLimit?.maxHeight ?? PI_DEFAULT_MAX_IMAGE_EDGE,
+        },
+      };
+      const underPiBytes = {
+        ...withinPiSize,
+        maxBase64Bytes: Math.min(
+          config.maxBase64Bytes,
+          (piLimit?.maxBytes ?? PI_DEFAULT_MAX_IMAGE_BASE64_BYTES) - 1,
+        ),
+      };
+      const profile = IMAGE_PROFILES[profileName];
+      // A byte limit that this encoder cannot reach in the requested format is left to Pi, which
+      // can also change the format.
+      const output = await cropAndMagnify(input, rootCrop, profile, format, underPiBytes).catch(() =>
+        cropAndMagnify(input, rootCrop, profile, format, withinPiSize),
       );
 
       const resultSourceId = `zoom:${nextZoomIndex++}`;
