@@ -379,3 +379,29 @@ test("source_id and path may both be sent when they name the same image", async 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("a macOS screenshot name typed with a plain space resolves to the file", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-screenshot-"));
+  try {
+    const onDisk = join(dir, "Screenshot 2026-10-15 at 4.40.17\u202Fpm.png");
+    const typed = join(dir, "Screenshot 2026-10-15 at 4.40.17 pm.png");
+    await writeSolidImage(onDisk, 3000, 1600, "#336699");
+
+    const pi = new MockPi();
+    imageZoomExtension(pi as any);
+    const ctx = makeContext(dir);
+    const tool = pi.tools.get("zoom_image");
+
+    const zoomed = await tool.execute("call", { path: typed, x1: 0, y1: 0, x2: 100, y2: 100 }, undefined, undefined, ctx);
+    assert.equal(zoomed.details.root.path, onDisk);
+
+    const fresh = new MockPi();
+    imageZoomExtension(fresh as any);
+    const { contexts } = await emitImageResult(fresh, ctx, "read", onDisk, { input: { path: typed } });
+    const [context] = contexts;
+    assert.equal(context.path, onDisk);
+    assert.deepEqual(context.original, { width: 3000, height: 1600 });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
