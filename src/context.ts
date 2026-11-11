@@ -13,7 +13,7 @@ export interface ZoomContextMetadata {
   sourceId: string;
   /** Position of this image block within the containing message. */
   contentImageIndex?: number;
-  origin: "attachment" | "read";
+  origin: "attachment" | "read" | "tool";
   view: Dimensions;
   original: Dimensions;
   path?: string;
@@ -43,7 +43,7 @@ export function parseZoomContexts(text: string): ZoomContextMetadata[] {
         value.sourceId.length > 0 &&
         isNonNegativeInteger(value.imageIndex) &&
         (value.contentImageIndex === undefined || isNonNegativeInteger(value.contentImageIndex)) &&
-        (value.origin === "attachment" || value.origin === "read") &&
+        (value.origin === "attachment" || value.origin === "read" || value.origin === "tool") &&
         isPositiveInteger(value.view?.width) &&
         isPositiveInteger(value.view?.height) &&
         isPositiveInteger(value.original?.width) &&
@@ -82,6 +82,9 @@ export function removePiDimensionNotes(text: string): string {
 
 function describeCoordinateFrame(metadata: ZoomContextMetadata): string {
   const { sourceId, view, original } = metadata;
+  if (metadata.origin === "tool") {
+    return `${sourceId}: zoom_image coordinates are pixels of the ${original.width}x${original.height} original.`;
+  }
   const same = view.width === original.width && view.height === original.height;
   if (same) {
     return `${sourceId}: zoom_image coordinates are pixels of this ${view.width}x${view.height} image.`;

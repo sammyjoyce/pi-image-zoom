@@ -4,7 +4,13 @@ import { homedir } from "node:os";
 import { basename, extname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
-import { createReadTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  createReadTool,
+  type ExtensionAPI,
+  type ExtensionContext,
+  type ToolResultEvent,
+  type ToolResultEventResult,
+} from "@earendil-works/pi-coding-agent";
 import { compile, int, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
 import { Text } from "@earendil-works/pi-tui";
 import {
@@ -34,6 +40,7 @@ import {
 
 const TOOL_NAME = "zoom_image";
 const DETAILS_KIND = "pi-image-zoom-v1";
+const MAX_IN_MEMORY_TOOL_IMAGES = 8;
 const IMAGE_EXTENSIONS = new Set([
   ".avif",
   ".bmp",
@@ -296,9 +303,11 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
   const roots = new Map<string, RootRecord>();
   const sources = new Map<string, SourceRecord>();
   const pathToSourceId = new Map<string, string>();
-  // Default for calls with no selector: the latest attached/read image, never a
-  // zoom crop. The model sends original-pixel boxes when it omits the selector.
-  let latestRootSourceId: string | undefined;
+  // The source for a call with no selector: a whole image, never a zoom crop. The model sends
+  // original-pixel boxes when it omits the selector.
+  let defaultSourceId: string | undefined;
+  const toolImageRootIds: string[] = [];
+  const releasedToolImageIds = new Set<string>();
   let nextImageIndex = 0;
   let nextZoomIndex = 0;
 
@@ -312,7 +321,9 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     roots.clear();
     sources.clear();
     pathToSourceId.clear();
-    latestRootSourceId = undefined;
+    defaultSourceId = undefined;
+    toolImageRootIds.length = 0;
+    releasedToolImageIds.clear();
     nextImageIndex = 0;
     nextZoomIndex = 0;
   }
@@ -320,7 +331,12 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
   function addRootAndSource(root: RootRecord, source: SourceRecord): void {
     roots.set(root.id, root);
     sources.set(source.id, source);
-    latestRootSourceId = source.id;
+    // Parallel tool results register in the order they finish, and a reload registers them in
+    // transcript order. The highest image number is the same image in both.
+    const defaultIndex = defaultSourceId === undefined ? undefined : sources.get(defaultSourceId)?.imageIndex;
+    if (source.imageIndex === undefined || defaultIndex === undefined || source.imageIndex > defaultIndex) {
+      defaultSourceId = source.id;
+    }
 
     if (source.imageIndex !== undefined) {
       nextImageIndex = Math.max(nextImageIndex, source.imageIndex + 1);
@@ -432,26 +448,71 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     };
   }
 
-  function restoreRootFromMessage(metadata: ZoomContextMetadata, image: ImageContent): void {
+  async function registerToolImage(image: ImageContent, contentImageIndex: number): Promise<ZoomContextMetadata> {
+    const imageIndex = nextImageIndex++;
+    const sourceId = `image:${imageIndex}`;
+    const dimensions = await getOrientedDimensions(Buffer.from(image.data, "base64"));
+    const label = `tool image ${imageIndex}`;
+    addRootAndSource(
+      { id: sourceId, label, ...dimensions, input: { kind: "base64", data: image.data, mimeType: image.mimeType } },
+      {
+        id: sourceId,
+        rootId: sourceId,
+        label,
+        viewWidth: dimensions.width,
+        viewHeight: dimensions.height,
+        rootRect: { left: 0, top: 0, ...dimensions },
+        imageIndex,
+      },
+    );
+
+    toolImageRootIds.push(sourceId);
+    if (toolImageRootIds.length > MAX_IN_MEMORY_TOOL_IMAGES) {
+      const released = toolImageRootIds.shift()!;
+      roots.delete(released);
+      for (const source of sources.values()) {
+        if (source.rootId === released) sources.delete(source.id);
+      }
+      releasedToolImageIds.add(released);
+    }
+
+    return {
+      version: 1,
+      imageIndex,
+      sourceId,
+      contentImageIndex,
+      origin: "tool",
+      view: dimensions,
+      original: dimensions,
+      label,
+    };
+  }
+
+  async function restoreRootFromMessage(metadata: ZoomContextMetadata, image: ImageContent): Promise<void> {
     if (sources.has(metadata.sourceId)) return;
 
-    const hasPath = typeof metadata.path === "string" && metadata.path.length > 0;
-    const rootDimensions = hasPath ? metadata.original : metadata.view;
-    const root: RootRecord = {
-      id: metadata.sourceId,
-      label: metadata.label ?? `image ${metadata.imageIndex}`,
-      width: rootDimensions.width,
-      height: rootDimensions.height,
-      input: hasPath
-        ? { kind: "path", path: metadata.path! }
-        : { kind: "base64", data: image.data, mimeType: image.mimeType },
-    };
+    // Pi resizes tool-result images after tool_result handlers run, so a stored image without a
+    // file can be smaller than metadata.original. The root size comes from the bytes. The source
+    // keeps the original frame that the model addresses.
+    const root: RootRecord = metadata.path
+      ? {
+          id: metadata.sourceId,
+          label: metadata.label ?? `image ${metadata.imageIndex}`,
+          ...metadata.original,
+          input: { kind: "path", path: metadata.path },
+        }
+      : {
+          id: metadata.sourceId,
+          label: metadata.label ?? `image ${metadata.imageIndex}`,
+          ...(await getOrientedDimensions(Buffer.from(image.data, "base64"))),
+          input: { kind: "base64", data: image.data, mimeType: image.mimeType },
+        };
     const source: SourceRecord = {
       id: metadata.sourceId,
       rootId: metadata.sourceId,
       label: root.label,
-      viewWidth: root.width,
-      viewHeight: root.height,
+      viewWidth: metadata.original.width,
+      viewHeight: metadata.original.height,
       rootRect: { left: 0, top: 0, width: root.width, height: root.height },
       imageIndex: metadata.imageIndex,
       path: metadata.path,
@@ -475,19 +536,30 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
         viewWidth: root.width,
         viewHeight: root.height,
         rootRect: { left: 0, top: 0, width: root.width, height: root.height },
+        imageIndex: parseCounter(details.rootId, "image"),
         path: details.root.path,
       };
       addRootAndSource(root, rootSource);
     }
 
-    if (!roots.has(details.rootId) || sources.has(details.resultSourceId)) return;
+    const restoredRoot = roots.get(details.rootId);
+    if (!restoredRoot || sources.has(details.resultSourceId)) return;
+    const scaleX = restoredRoot.width / details.root.width;
+    const scaleY = restoredRoot.height / details.root.height;
+    const left = Math.min(restoredRoot.width - 1, Math.round(details.rootCrop.left * scaleX));
+    const top = Math.min(restoredRoot.height - 1, Math.round(details.rootCrop.top * scaleY));
     addDerivedSource({
       id: details.resultSourceId,
       rootId: details.rootId,
       label: `${details.root.label} zoom`,
       viewWidth: details.output.width,
       viewHeight: details.output.height,
-      rootRect: details.rootCrop,
+      rootRect: {
+        left,
+        top,
+        width: Math.max(1, Math.min(restoredRoot.width - left, Math.round(details.rootCrop.width * scaleX))),
+        height: Math.max(1, Math.min(restoredRoot.height - top, Math.round(details.rootCrop.height * scaleY))),
+      },
       path: details.root.path,
     });
   }
@@ -507,7 +579,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
           const metadata = contexts[index]!;
           const imagePosition = metadata.contentImageIndex ?? index;
           const image = images[imagePosition];
-          if (image) restoreRootFromMessage(metadata, image);
+          if (image) await restoreRootFromMessage(metadata, image).catch(() => undefined);
         }
       }
 
@@ -561,10 +633,30 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     return { action: "transform", text, images: preparedImages };
   });
 
-  // Images loaded later through Pi's built-in read tool also become calibrated,
-  // full-resolution roots before the next model turn.
   pi.on("tool_result", async (event, ctx) => {
-    if (event.toolName !== "read" || event.isError) return;
+    if (event.toolName === TOOL_NAME) return;
+    if (event.toolName === "read") return calibrateReadResult(event, ctx);
+    if (event.parentToolCallId) return;
+
+    // Pi resizes tool images after this handler runs, so these are the tool's full-size bytes.
+    const metadata: ZoomContextMetadata[] = [];
+    const images = contentImages(event.content);
+    for (let index = 0; index < images.length; index++) {
+      const registered = await registerToolImage(images[index]!, index).catch(() => undefined);
+      if (registered) metadata.push(registered);
+    }
+    if (metadata.length === 0) return;
+    return {
+      content: [...event.content, { type: "text" as const, text: buildZoomContextBlock(metadata) }],
+      structuredContent: event.structuredContent,
+    };
+  });
+
+  async function calibrateReadResult(
+    event: ToolResultEvent,
+    ctx: ExtensionContext,
+  ): Promise<ToolResultEventResult | undefined> {
+    if (event.isError) return;
     const imageContentIndex = event.content.findIndex(isImageContent);
     if (imageContentIndex < 0) return;
     const image = event.content[imageContentIndex];
@@ -602,7 +694,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     } catch {
       return;
     }
-  });
+  }
 
   async function resolveSource(params: ZoomParams, cwd: string): Promise<{ source: SourceRecord; root: RootRecord }> {
     if (params.source_id !== undefined && params.path !== undefined) {
@@ -619,6 +711,9 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
 
     if (params.source_id !== undefined) {
       source = sources.get(params.source_id);
+      if (!source && releasedToolImageIds.has(params.source_id)) {
+        throw new Error(`${params.source_id} is no longer held in memory. Capture the image again, or save it to a file and pass path.`);
+      }
       if (!source) throw new Error(`Unknown source_id ${JSON.stringify(params.source_id)}. Run /zoom-images to list sources.`);
     } else if (params.path !== undefined) {
       const path = await resolveImagePath(params.path, cwd);
@@ -647,8 +742,8 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
         };
         addRootAndSource(root, source);
       }
-    } else if (latestRootSourceId) {
-      source = sources.get(latestRootSourceId);
+    } else if (defaultSourceId) {
+      source = sources.get(defaultSourceId);
     }
 
     if (!source) {
