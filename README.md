@@ -9,7 +9,7 @@ The extension registers `zoom_image`, which accepts an absolute pixel rectangle,
 - **Coordinate-calibrated inputs.** Attached, pasted, dropped, and `read` images are prepared before the model sees them, and Pi receives the exact visible dimensions in a small context block.
 - **Full-resolution crops.** File-backed images are always cropped from the original file, not the overview sent to the model.
 - **Recursive zoom without generation loss.** Every crop gets a `zoom:N` source ID whose coordinate space maps back to the original image. A second zoom therefore crops the original pixels again rather than cropping the enlarged JPEG.
-- **Multiple images.** The model can select `image_index`, `source_id`, or a direct `path`.
+- **Multiple images.** The model can select a `source_id` or a direct `path`.
 - **Provider-safe history.** Zoom results default to high-quality 4:4:4 JPEG and are kept below a configurable base64 payload budget. PNG remains available for tiny text and line art.
 - **Branch-aware state.** Root images and zoom transforms are reconstructed from the active Pi session branch after resume, reload, or tree navigation.
 
@@ -55,14 +55,14 @@ Attach an image in any normal Pi way, then ask a question that may require fine 
 Pi injects metadata similar to:
 
 ```text
-image:0 (image_index 0): zoom_image coordinates are pixels of the 4032x2366 original. The attached picture is a 1432x840 preview; multiply preview coordinates by 2.82.
+image:0: zoom_image coordinates are pixels of the 4032x2366 original. The attached picture is a 1432x840 preview; multiply preview coordinates by 2.82.
 ```
 
 The model can then call, in original pixels:
 
 ```json
 {
-  "image_index": 0,
+  "source_id": "image:0",
   "x1": 1520,
   "y1": 590,
   "x2": 2540,
@@ -102,8 +102,6 @@ You can inspect the registry manually with:
   "y2": 420
 }
 ```
-
-When the model saw an externally resized copy rather than an image calibrated by this extension, it can also pass `view_width` and `view_height` so coordinates map back to the original.
 
 ## Profiles
 

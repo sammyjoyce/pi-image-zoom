@@ -81,13 +81,13 @@ export function removePiDimensionNotes(text: string): string {
 }
 
 function describeCoordinateFrame(metadata: ZoomContextMetadata): string {
-  const { sourceId, imageIndex, view, original } = metadata;
+  const { sourceId, view, original } = metadata;
   const same = view.width === original.width && view.height === original.height;
   if (same) {
-    return `${sourceId} (image_index ${imageIndex}): zoom_image coordinates are pixels of this ${view.width}x${view.height} image.`;
+    return `${sourceId}: zoom_image coordinates are pixels of this ${view.width}x${view.height} image.`;
   }
   const scale = (original.width / view.width).toFixed(2);
-  return `${sourceId} (image_index ${imageIndex}): zoom_image coordinates are pixels of the ${original.width}x${original.height} original. The attached picture is a ${view.width}x${view.height} preview; multiply preview coordinates by ${scale}.`;
+  return `${sourceId}: zoom_image coordinates are pixels of the ${original.width}x${original.height} original. The attached picture is a ${view.width}x${view.height} preview; multiply preview coordinates by ${scale}.`;
 }
 
 export function buildZoomContextBlock(metadata: ZoomContextMetadata[]): string {

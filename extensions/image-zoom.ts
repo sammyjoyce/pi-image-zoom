@@ -113,16 +113,10 @@ const ZoomParameters = obj({
         'Source identifier reported beside an image or by a previous zoom, for example "image:0" or "zoom:2".',
     }),
   ),
-  image_index: opt(
-    int({
-      minimum: 0,
-      description: "Root image index reported in pi-image-zoom-context. Omit when there is only one image.",
-    }),
-  ),
   path: opt(
     str({
       description:
-        "Path to an image. Prefer source_id/image_index when Pi already reported one; direct paths use original pixels unless view_width/view_height are supplied.",
+        "Path to an image file. Coordinates are pixels of the file's full-resolution image.",
     }),
   ),
   x1: int({
@@ -138,19 +132,6 @@ const ZoomParameters = obj({
   y2: int({
     description: "Bottom edge in absolute pixels; must be greater than y1.",
   }),
-  view_width: opt(
-    int({
-      minimum: 1,
-      description:
-        "Optional width of an externally resized view. Supply together with view_height only when using path without a registered source.",
-    }),
-  ),
-  view_height: opt(
-    int({
-      minimum: 1,
-      description: "Optional height paired with view_width.",
-    }),
-  ),
   profile: opt(
     oneOf(["standard", "high"], {
       description:
@@ -255,7 +236,6 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
   const config = loadConfig();
   const roots = new Map<string, RootRecord>();
   const sources = new Map<string, SourceRecord>();
-  const imageIndexToSourceId = new Map<number, string>();
   const pathToSourceId = new Map<string, string>();
   // Default for calls with no selector: the latest attached/read image, never a
   // zoom crop. The model sends original-pixel boxes when it omits the selector.
@@ -272,7 +252,6 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
   function resetState(): void {
     roots.clear();
     sources.clear();
-    imageIndexToSourceId.clear();
     pathToSourceId.clear();
     latestRootSourceId = undefined;
     nextImageIndex = 0;
@@ -285,7 +264,6 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     latestRootSourceId = source.id;
 
     if (source.imageIndex !== undefined) {
-      imageIndexToSourceId.set(source.imageIndex, source.id);
       nextImageIndex = Math.max(nextImageIndex, source.imageIndex + 1);
     }
     if (source.path) {
@@ -564,14 +542,8 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
   });
 
   async function resolveSource(params: ZoomParams, cwd: string): Promise<{ source: SourceRecord; root: RootRecord }> {
-    const selectorCount = [params.source_id !== undefined, params.image_index !== undefined, params.path !== undefined].filter(
-      Boolean,
-    ).length;
-    if (selectorCount > 1) {
-      throw new Error("Choose exactly one of source_id, image_index, or path");
-    }
-    if ((params.view_width === undefined) !== (params.view_height === undefined)) {
-      throw new Error("view_width and view_height must be supplied together");
+    if (params.source_id !== undefined && params.path !== undefined) {
+      throw new Error("Choose exactly one of source_id or path");
     }
 
     let source: SourceRecord | undefined;
@@ -579,10 +551,6 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     if (params.source_id !== undefined) {
       source = sources.get(params.source_id);
       if (!source) throw new Error(`Unknown source_id ${JSON.stringify(params.source_id)}. Run /zoom-images to list sources.`);
-    } else if (params.image_index !== undefined) {
-      const sourceId = imageIndexToSourceId.get(params.image_index);
-      source = sourceId ? sources.get(sourceId) : undefined;
-      if (!source) throw new Error(`Unknown image_index ${params.image_index}. Run /zoom-images to list images.`);
     } else if (params.path !== undefined) {
       const path = normalizePathArgument(params.path, cwd);
       await assertUsablePath(path);
@@ -603,8 +571,8 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
           id: rootId,
           rootId,
           label: root.label,
-          viewWidth: params.view_width ?? dimensions.width,
-          viewHeight: params.view_height ?? dimensions.height,
+          viewWidth: dimensions.width,
+          viewHeight: dimensions.height,
           rootRect: { left: 0, top: 0, width: dimensions.width, height: dimensions.height },
           path,
         };
@@ -618,14 +586,6 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       throw new Error("No image source is registered. Attach, paste, drop, or read an image, or pass path.");
     }
 
-    if (params.view_width !== undefined && params.view_height !== undefined) {
-      source = {
-        ...source,
-        viewWidth: params.view_width,
-        viewHeight: params.view_height,
-      };
-    }
-
     const root = roots.get(source.rootId);
     if (!root) throw new Error(`Full-resolution root ${source.rootId} is unavailable in this session branch`);
     if (root.input.kind === "path") await assertUsablePath(root.input.path);
@@ -636,7 +596,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     name: TOOL_NAME,
     label: "Image zoom",
     description:
-      "Crop and magnify a rectangular region from an image's full-resolution root. For image:N and path sources, coordinates are pixels of the original full-resolution image (the attached picture is a downscaled preview; pi-image-zoom-context reports its size and the multiplier). For zoom:N sources, coordinates are pixels of that crop's returned size. Select with source_id, image_index, or path; when omitted, the most recent attached or read image is used (pass a zoom:N source_id explicitly to zoom into a crop). Each result returns a new source_id that can be cropped again without losing the link to the original pixels.",
+      "Crop and magnify a rectangular region from an image's full-resolution root. For image:N and path sources, coordinates are pixels of the original full-resolution image (the attached picture is a downscaled preview; pi-image-zoom-context reports its size and the multiplier). For zoom:N sources, coordinates are pixels of that crop's returned size. Select with source_id or path; when omitted, the most recent attached or read image is used (pass a zoom:N source_id explicitly to zoom into a crop). Each result returns a new source_id that can be cropped again without losing the link to the original pixels.",
     promptSnippet: "Crop and magnify fine detail from attached or filesystem images",
     promptGuidelines: [
       "Use zoom_image whenever labels, text, boundaries, crossings, UI controls, or other image details are too small to read reliably.",
@@ -728,8 +688,8 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
 
     renderCall(args, theme) {
       // Pi 1.5.2 types render arguments with TypeBox's Static, which is unknown for a pi-schema schema.
-      const { source_id, image_index, path, x1, y1, x2, y2 } = args as ZoomParams;
-      const selector = source_id ?? (image_index !== undefined ? `image:${image_index}` : path ?? "latest image");
+      const { source_id, path, x1, y1, x2, y2 } = args as ZoomParams;
+      const selector = source_id ?? path ?? "latest image";
       const region = `(${x1},${y1})–(${x2},${y2})`;
       return new Text(
         `${theme.fg("toolTitle", theme.bold("zoom image"))} ${theme.fg("accent", String(selector))} ${theme.fg("muted", region)}`,
@@ -750,9 +710,8 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
 
       const lines = available.slice(-30).map((source) => {
         const root = roots.get(source.rootId);
-        const index = source.imageIndex !== undefined ? ` image_index=${source.imageIndex}` : "";
         const full = root ? ` → ${root.width}x${root.height} root` : "";
-        return `${source.id}${index}: ${source.viewWidth}x${source.viewHeight}${full} · ${source.label}`;
+        return `${source.id}: ${source.viewWidth}x${source.viewHeight}${full} · ${source.label}`;
       });
       if (available.length > 30) lines.unshift(`… ${available.length - 30} older sources omitted`);
       ctx.ui.notify(lines.join("\n"), "info");
