@@ -491,3 +491,121 @@ test("a read made by another tool keeps its result", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("an image from another tool becomes a zoom source in its original frame", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-tool-"));
+  try {
+    const screenshot = join(dir, "screenshot.png");
+    const second = join(dir, "second.png");
+    await writeSolidImage(screenshot, 4040, 2320, "#224466");
+    await writeSolidImage(second, 640, 480, "#664422");
+    const pi = new MockPi();
+    imageZoomExtension(pi as any);
+    const ctx = makeContext(dir);
+    const tool = pi.tools.get("zoom_image");
+
+    const structuredContent = { windows: 3 };
+    const { result, contexts } = await emitImageResult(pi, ctx, "desktop", screenshot, { input: {}, structuredContent });
+    assert.equal(result.content[0].data, (await readFile(screenshot)).toString("base64"));
+    assert.deepEqual(result.structuredContent, structuredContent);
+    assert.equal(contexts.length, 1);
+    assert.equal(contexts[0].origin, "tool");
+    assert.deepEqual(contexts[0].original, { width: 4040, height: 2320 });
+    assert.match(result.content.at(-1).text, /image:0: zoom_image coordinates are pixels of the 4040x2320 original\./);
+
+    const box = { x1: 220, y1: 2060, x2: 960, y2: 2180 };
+    const zoomed = await tool.execute("call", box, undefined, undefined, ctx);
+    assert.equal(zoomed.details.sourceId, "image:0");
+    assert.deepEqual(zoomed.details.rootCrop, { left: 220, top: 2060, width: 740, height: 120 });
+
+    const images = [screenshot, second].map(async (path) => ({
+      type: "image",
+      data: (await readFile(path)).toString("base64"),
+      mimeType: "image/png",
+    }));
+    const [several] = await pi.emit(
+      "tool_result",
+      {
+        type: "tool_result",
+        toolCallId: "script-1",
+        toolName: "codemode",
+        input: {},
+        content: [{ type: "text", text: "Script completed" }, ...(await Promise.all(images))],
+        details: undefined,
+        isError: false,
+      },
+      ctx,
+    );
+    const severalContexts = parseZoomContexts(several.content.at(-1).text);
+    assert.deepEqual(
+      severalContexts.map(({ sourceId, contentImageIndex, original }) => ({ sourceId, contentImageIndex, original })),
+      [
+        { sourceId: "image:1", contentImageIndex: 0, original: { width: 4040, height: 2320 } },
+        { sourceId: "image:2", contentImageIndex: 1, original: { width: 640, height: 480 } },
+      ],
+    );
+
+    const { result: ownResult } = await emitImageResult(pi, ctx, "zoom_image", second, { input: {} });
+    assert.equal(ownResult, undefined);
+
+    const displayed = await sharp(screenshot).resize(2000, 1149, { fit: "fill" }).png().toBuffer();
+    const branch = [
+      {
+        type: "message",
+        message: {
+          role: "toolResult",
+          toolCallId: "desktop-1",
+          toolName: "desktop",
+          content: [
+            { type: "image", data: displayed.toString("base64"), mimeType: "image/png" },
+            { type: "text", text: "[Image: original 4040x2320, displayed at 2000x1149. Multiply coordinates by 2.02 to map to original image.]" },
+            result.content.at(-1),
+          ],
+          isError: false,
+          timestamp: Date.now(),
+        },
+      },
+    ];
+    const restoredPi = new MockPi();
+    imageZoomExtension(restoredPi as any);
+    const restoredCtx = makeContext(dir, branch);
+    await restoredPi.emit("session_start", { type: "session_start", reason: "resume" }, restoredCtx);
+    const restored = await restoredPi.tools
+      .get("zoom_image")
+      .execute("call", { ...box, source_id: "image:0" }, undefined, undefined, restoredCtx);
+    assert.deepEqual(
+      { width: restored.details.root.width, height: restored.details.root.height },
+      { width: 2000, height: 1149 },
+    );
+    assert.deepEqual(restored.details.rootCrop, { left: 108, top: 1020, width: 368, height: 60 });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("only the newest tool images keep their full-size bytes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-retain-"));
+  try {
+    const path = join(dir, "shot.png");
+    await writeSolidImage(path, 400, 300, "#224466");
+    const pi = new MockPi();
+    imageZoomExtension(pi as any);
+    const ctx = makeContext(dir);
+    const tool = pi.tools.get("zoom_image");
+    for (let index = 0; index < 9; index++) {
+      await emitImageResult(pi, ctx, "desktop", path, { input: {}, toolCallId: `desktop-${index}` });
+    }
+
+    const box = { x1: 0, y1: 0, x2: 100, y2: 100 };
+    const newest = await tool.execute("call", { ...box, source_id: "image:8" }, undefined, undefined, ctx);
+    assert.equal(newest.details.rootId, "image:8");
+    const oldestKept = await tool.execute("call", { ...box, source_id: "image:1" }, undefined, undefined, ctx);
+    assert.equal(oldestKept.details.rootId, "image:1");
+    await assert.rejects(
+      tool.execute("call", { ...box, source_id: "image:0" }, undefined, undefined, ctx),
+      /image:0 is no longer held in memory/,
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
