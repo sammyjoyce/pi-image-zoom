@@ -856,19 +856,16 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       // limits and under the byte limit. A crop beyond them would reach the model smaller than
       // the size this result reports.
       const piLimit = ctx?.model?.inputLimits?.images?.resize;
-      const profile = IMAGE_PROFILES[profileName];
-      const maxEdge = Math.min(
-        profile.maxEdge,
-        piLimit?.maxWidth ?? PI_DEFAULT_MAX_IMAGE_EDGE,
-        piLimit?.maxHeight ?? PI_DEFAULT_MAX_IMAGE_EDGE,
-      );
-      const maxBase64Bytes = Math.min(
-        config.maxBase64Bytes,
-        (piLimit?.maxBytes ?? PI_DEFAULT_MAX_IMAGE_BASE64_BYTES) - 1,
-      );
-      const output = await cropAndMagnify(input, rootCrop, { ...profile, maxEdge }, format, {
+      const output = await cropAndMagnify(input, rootCrop, IMAGE_PROFILES[profileName], format, {
         ...encodeOptions(signal),
-        maxBase64Bytes,
+        maxSize: {
+          width: piLimit?.maxWidth ?? PI_DEFAULT_MAX_IMAGE_EDGE,
+          height: piLimit?.maxHeight ?? PI_DEFAULT_MAX_IMAGE_EDGE,
+        },
+        maxBase64Bytes: Math.min(
+          config.maxBase64Bytes,
+          (piLimit?.maxBytes ?? PI_DEFAULT_MAX_IMAGE_BASE64_BYTES) - 1,
+        ),
       });
 
       const resultSourceId = `zoom:${nextZoomIndex++}`;

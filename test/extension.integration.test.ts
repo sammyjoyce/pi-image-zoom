@@ -8,7 +8,6 @@ import { type JsonObject, validateToolArguments } from "@earendil-works/pi-ai";
 import sharp from "sharp";
 import imageZoomExtension from "../extensions/image-zoom.ts";
 import { parseZoomContexts } from "../src/context.ts";
-import { IMAGE_PATCH_SIZE } from "../src/geometry.ts";
 import { IMAGE_PROFILES } from "../src/image.ts";
 
 class MockPi {
@@ -807,7 +806,7 @@ test("the result text states the real scale of the crop", async () => {
     await writeSolidImage(big, 6000, 800, "#ff00ff");
     const highBox = { path: big, x1: 0, y1: 0, x2: 6000, y2: 800, profile: "high" };
     const high = await tool.execute("call", highBox, undefined, undefined, ctx);
-    assert.equal(high.details.output.width, Math.floor(2000 / IMAGE_PATCH_SIZE) * IMAGE_PATCH_SIZE);
+    assert.equal(high.details.output.width, 2000);
     const roomy = { ...ctx, model: { inputLimits: { images: { resize: { maxWidth: 4000, maxHeight: 4000 } } } } };
     const highWithRoom = await tool.execute("call", highBox, undefined, undefined, roomy);
     assert.equal(highWithRoom.details.output.width, IMAGE_PROFILES.high.maxEdge);
@@ -820,6 +819,20 @@ test("the result text states the real scale of the crop", async () => {
     const small = await tool.execute("call", { path: noisy, x1: 0, y1: 0, x2: 1092, y2: 1092 }, undefined, undefined, tight);
     assert.ok(small.content[1].data.length < 100_000);
     assert.match(small.content[0].text, /reduced it to 0\.\d\dx/);
+
+    const tighter = { ...ctx, model: { inputLimits: { images: { resize: { maxBytes: 10_000 } } } } };
+    const tiny = await tool.execute(
+      "call",
+      { path: noisy, x1: 0, y1: 0, x2: 1200, y2: 1200, output_format: "png" },
+      undefined,
+      undefined,
+      tighter,
+    );
+    assert.ok(tiny.content[1].data.length < 10_000);
+
+    const wideOnly = { ...ctx, model: { inputLimits: { images: { resize: { maxWidth: 1800, maxHeight: 400 } } } } };
+    const strip = await tool.execute("call", { path: big, x1: 0, y1: 0, x2: 1600, y2: 200 }, undefined, undefined, wideOnly);
+    assert.deepEqual({ width: strip.details.output.width, height: strip.details.output.height }, { width: 1568, height: 196 });
 
     const clipped = await textOf({ x1: 2800, y1: 300, x2: 3600, y2: 500 });
     assert.match(clipped, /The requested box \(2800,300\)-\(3600,500\) extends past the 3000x400px image and was clipped\./);

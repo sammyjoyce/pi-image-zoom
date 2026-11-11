@@ -96,6 +96,17 @@ export function zoomSize(width: number, height: number, budget: ImageBudget): Di
   return resizedSize(width * MAX_ZOOM_MAGNIFICATION, height * MAX_ZOOM_MAGNIFICATION, budget);
 }
 
+/** Scale a size down, keeping its shape, until it is within the limit in both directions. */
+export function fitWithin(size: Dimensions, limit: Dimensions | undefined): Dimensions {
+  if (!limit) return size;
+  const scale = Math.min(1, limit.width / size.width, limit.height / size.height);
+  if (scale === 1) return size;
+  return {
+    width: Math.max(1, Math.floor(size.width * scale)),
+    height: Math.max(1, Math.floor(size.height * scale)),
+  };
+}
+
 export function clampCoordinateBox(
   box: CoordinateBox,
   viewWidth: number,
