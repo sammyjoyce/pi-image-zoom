@@ -303,9 +303,9 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
   const roots = new Map<string, RootRecord>();
   const sources = new Map<string, SourceRecord>();
   const pathToSourceId = new Map<string, string>();
-  // Default for calls with no selector: the latest attached/read image, never a
-  // zoom crop. The model sends original-pixel boxes when it omits the selector.
-  let latestRootSourceId: string | undefined;
+  // The source for a call with no selector: a whole image, never a zoom crop. The model sends
+  // original-pixel boxes when it omits the selector.
+  let defaultSourceId: string | undefined;
   const toolImageRootIds: string[] = [];
   const releasedToolImageIds = new Set<string>();
   let nextImageIndex = 0;
@@ -321,7 +321,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     roots.clear();
     sources.clear();
     pathToSourceId.clear();
-    latestRootSourceId = undefined;
+    defaultSourceId = undefined;
     toolImageRootIds.length = 0;
     releasedToolImageIds.clear();
     nextImageIndex = 0;
@@ -331,7 +331,12 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
   function addRootAndSource(root: RootRecord, source: SourceRecord): void {
     roots.set(root.id, root);
     sources.set(source.id, source);
-    latestRootSourceId = source.id;
+    // Parallel tool results register in the order they finish, and a reload registers them in
+    // transcript order. The highest image number is the same image in both.
+    const defaultIndex = defaultSourceId === undefined ? undefined : sources.get(defaultSourceId)?.imageIndex;
+    if (source.imageIndex === undefined || defaultIndex === undefined || source.imageIndex > defaultIndex) {
+      defaultSourceId = source.id;
+    }
 
     if (source.imageIndex !== undefined) {
       nextImageIndex = Math.max(nextImageIndex, source.imageIndex + 1);
@@ -536,14 +541,24 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       addRootAndSource(root, rootSource);
     }
 
-    if (!roots.has(details.rootId) || sources.has(details.resultSourceId)) return;
+    const restoredRoot = roots.get(details.rootId);
+    if (!restoredRoot || sources.has(details.resultSourceId)) return;
+    const scaleX = restoredRoot.width / details.root.width;
+    const scaleY = restoredRoot.height / details.root.height;
+    const left = Math.min(restoredRoot.width - 1, Math.round(details.rootCrop.left * scaleX));
+    const top = Math.min(restoredRoot.height - 1, Math.round(details.rootCrop.top * scaleY));
     addDerivedSource({
       id: details.resultSourceId,
       rootId: details.rootId,
       label: `${details.root.label} zoom`,
       viewWidth: details.output.width,
       viewHeight: details.output.height,
-      rootRect: details.rootCrop,
+      rootRect: {
+        left,
+        top,
+        width: Math.max(1, Math.min(restoredRoot.width - left, Math.round(details.rootCrop.width * scaleX))),
+        height: Math.max(1, Math.min(restoredRoot.height - top, Math.round(details.rootCrop.height * scaleY))),
+      },
       path: details.root.path,
     });
   }
@@ -726,8 +741,8 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
         };
         addRootAndSource(root, source);
       }
-    } else if (latestRootSourceId) {
-      source = sources.get(latestRootSourceId);
+    } else if (defaultSourceId) {
+      source = sources.get(defaultSourceId);
     }
 
     if (!source) {
