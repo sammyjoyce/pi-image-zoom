@@ -317,7 +317,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     contentImageIndex: number,
     signal?: AbortSignal,
   ): Promise<{ image: ImageContent; metadata: ZoomContextMetadata }> {
-    const imageIndex = nextImageIndex;
+    const imageIndex = nextImageIndex++;
     const sourceId = `image:${imageIndex}`;
     let canonicalPath: string | undefined;
     let rootInput: RootInput | undefined;
