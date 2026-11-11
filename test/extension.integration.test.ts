@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, symlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import test from "node:test";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { type JsonObject, validateToolArguments } from "@earendil-works/pi-ai";
 import sharp from "sharp";
 import imageZoomExtension from "../extensions/image-zoom.ts";
@@ -375,6 +375,93 @@ test("source_id and path may both be sent when they name the same image", async 
       tool.execute("call", { ...box, source_id: contexts[0].sourceId, path: green }, undefined, undefined, ctx),
       /source_id "image:0" and path ".*green\.png" name different images/,
     );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a read of a path with a narrow space in a folder name registers the file Pi opened", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-folder-"));
+  try {
+    const plainDir = join(dir, "shots here");
+    const narrowDir = join(dir, "shots\u202Fhere");
+    await mkdir(plainDir);
+    await mkdir(narrowDir);
+    const piReads = join(plainDir, "capture 1 PM.png");
+    await writeSolidImage(piReads, 900, 500, "#ff0000");
+    await writeSolidImage(join(narrowDir, "capture 1\u202FPM.png"), 700, 300, "#0000ff");
+
+    const pi = new MockPi();
+    imageZoomExtension(pi as any);
+    const typed = join(narrowDir, "capture 1 PM.png");
+    const read = await emitImageResult(pi, makeContext(dir), "read", piReads, { input: { path: typed } });
+    assert.equal(read.contexts[0].path, piReads);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a read of a name that starts with a space or sits in quotes registers the file Pi opened", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-literal-"));
+  try {
+    const cases = [
+      { typed: " Screenshot 5.00.00 PM.png", neighbour: "Screenshot 5.00.00\u202FPM.png" },
+      { typed: "'Screenshot 6.00.00 PM.png'", neighbour: "Screenshot 6.00.00\u202FPM.png" },
+    ];
+    for (const { typed, neighbour } of cases) {
+      const piReads = join(dir, typed);
+      await writeSolidImage(piReads, 900, 500, "#ff0000");
+      await writeSolidImage(join(dir, neighbour), 700, 300, "#0000ff");
+      const pi = new MockPi();
+      imageZoomExtension(pi as any);
+      const read = await emitImageResult(pi, makeContext(dir), "read", piReads, { input: { path: typed } });
+      assert.equal(read.contexts[0].path, piReads);
+    }
+
+    // Pi joins "~//name" under the home directory. A resolver that treats "/name" as absolute
+    // would look at the root of the disk.
+    const home = await realpath(homedir());
+    const underHome = await mkdtemp(join(home, ".pi-image-zoom-test-"));
+    try {
+      const piReads = join(underHome, "shot 7.00.00 PM.png");
+      await writeSolidImage(piReads, 900, 500, "#ff0000");
+      const typed = `~//${basename(underHome)}/shot 7.00.00 PM.png`;
+      const pi = new MockPi();
+      imageZoomExtension(pi as any);
+      const read = await emitImageResult(pi, makeContext(dir), "read", piReads, { input: { path: typed } });
+      assert.equal(read.contexts[0].path, piReads);
+    } finally {
+      await rm(underHome, { recursive: true, force: true });
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("a macOS screenshot name typed with a plain space resolves to the file", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-screenshot-"));
+  try {
+    const onDisk = join(dir, "Screenshot 2026-10-15 at 4.40.17\u202Fpm.png");
+    const typed = join(dir, "Screenshot 2026-10-15 at 4.40.17 pm.png");
+    await writeSolidImage(onDisk, 3000, 1600, "#336699");
+
+    const pi = new MockPi();
+    imageZoomExtension(pi as any);
+    const ctx = makeContext(dir);
+    const tool = pi.tools.get("zoom_image");
+
+    const zoomed = await tool.execute("call", { path: typed, x1: 0, y1: 0, x2: 100, y2: 100 }, undefined, undefined, ctx);
+    assert.equal(zoomed.details.root.path, onDisk);
+
+    const fresh = new MockPi();
+    imageZoomExtension(fresh as any);
+    const { contexts } = await emitImageResult(fresh, ctx, "read", onDisk, { input: { path: typed } });
+    const [context] = contexts;
+    assert.equal(context.path, onDisk);
+    assert.deepEqual(context.original, { width: 3000, height: 1600 });
+
+    const exact = await tool.execute("call", { path: onDisk, x1: 0, y1: 0, x2: 100, y2: 100 }, undefined, undefined, ctx);
+    assert.equal(exact.details.root.path, onDisk);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

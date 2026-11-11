@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { basename, extname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { createReadTool, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { compile, int, obj, oneOf, opt, type Static, str } from "@earendil-works/pi-schema";
 import { Text } from "@earendil-works/pi-tui";
 import {
@@ -229,6 +229,33 @@ function normalizePathArgument(rawPath: string, cwd: string): string {
   if (value === "~") return homedir();
   if (value.startsWith("~/")) value = resolve(homedir(), value.slice(2));
   return isAbsolute(value) ? resolve(value) : resolve(cwd, value);
+}
+
+const fileExists = (path: string) => stat(path).then(() => true, () => false);
+
+/**
+ * The file that Pi's read tool opens for a typed path. Pi does not export its path resolver, and
+ * a copy of it would have to track every rule. The read tool takes replaceable file operations
+ * and hands them the resolved path, so a read that stops at its first operation names the file.
+ */
+async function pathPiReads(rawPath: string, cwd: string): Promise<string | undefined> {
+  let opened: string | undefined;
+  const probe = createReadTool(cwd, {
+    operations: {
+      access: async (path) => {
+        opened = path;
+        throw new Error("stop after the path is known");
+      },
+      readFile: async () => Buffer.alloc(0),
+    },
+  });
+  await probe.execute("path-probe", { path: rawPath }).catch(() => undefined);
+  return opened;
+}
+
+async function resolveImagePath(rawPath: string, cwd: string): Promise<string> {
+  const exact = normalizePathArgument(rawPath, cwd);
+  return (await fileExists(exact)) ? exact : ((await pathPiReads(rawPath, cwd)) ?? exact);
 }
 
 function isLikelyImagePath(path: string): boolean {
@@ -555,7 +582,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     if (!rawPath) return;
 
     try {
-      const path = normalizePathArgument(rawPath, ctx.cwd);
+      const path = await pathPiReads(rawPath, ctx.cwd);
       const registered = await registerIncomingImage(image, path, "read", contentImageIndex, ctx.signal);
       const content = event.content.map((part: TextContent | ImageContent, index: number) => {
         if (index === imageContentIndex) return registered.image;
@@ -577,7 +604,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     if (params.source_id !== undefined && params.path !== undefined) {
       const named = sources.get(params.source_id);
       const namesWholeImage = named?.id === named?.rootId && named?.path !== undefined;
-      if (named && !(namesWholeImage && (await isSameFile(named.path!, normalizePathArgument(params.path, cwd))))) {
+      if (named && !(namesWholeImage && (await isSameFile(named.path!, await resolveImagePath(params.path, cwd))))) {
         throw new Error(
           `source_id ${JSON.stringify(params.source_id)} and path ${JSON.stringify(params.path)} name different images. Send only one of them.`,
         );
@@ -590,7 +617,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       source = sources.get(params.source_id);
       if (!source) throw new Error(`Unknown source_id ${JSON.stringify(params.source_id)}. Run /zoom-images to list sources.`);
     } else if (params.path !== undefined) {
-      const path = normalizePathArgument(params.path, cwd);
+      const path = await resolveImagePath(params.path, cwd);
       await assertUsablePath(path);
       const existingSourceId = pathToSourceId.get(path);
       source = existingSourceId ? sources.get(existingSourceId) : undefined;
