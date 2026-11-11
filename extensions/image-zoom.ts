@@ -536,6 +536,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
         viewWidth: root.width,
         viewHeight: root.height,
         rootRect: { left: 0, top: 0, width: root.width, height: root.height },
+        imageIndex: parseCounter(details.rootId, "image"),
         path: details.root.path,
       };
       addRootAndSource(root, rootSource);

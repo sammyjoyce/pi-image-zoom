@@ -667,3 +667,48 @@ test("a zoom with no selector picks the same image before and after a reload", a
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("an image id restored from a crop is not given to a new image", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-reserve-"));
+  try {
+    const red = join(dir, "red.png");
+    const screenshot = join(dir, "screenshot.png");
+    await writeSolidImage(red, 1000, 600, "#ff0000");
+    await writeSolidImage(screenshot, 4040, 2320, "#224466");
+    const pi = new MockPi();
+    imageZoomExtension(pi as any);
+    const ctx = makeContext(dir);
+    await emitImageResult(pi, ctx, "read", red, { toolCallId: "script-1/1", parentToolCallId: "script-1" });
+    const crop = await pi.tools
+      .get("zoom_image")
+      .execute("call", { source_id: "image:0", x1: 0, y1: 0, x2: 200, y2: 100 }, undefined, undefined, ctx);
+
+    const branch = [
+      {
+        type: "message",
+        message: {
+          role: "toolResult",
+          toolCallId: "zoom-1",
+          toolName: "zoom_image",
+          content: crop.content,
+          details: crop.details,
+          isError: false,
+          timestamp: Date.now(),
+        },
+      },
+    ];
+    const restoredPi = new MockPi();
+    imageZoomExtension(restoredPi as any);
+    const restoredCtx = makeContext(dir, branch);
+    await restoredPi.emit("session_start", { type: "session_start", reason: "resume" }, restoredCtx);
+    const { contexts } = await emitImageResult(restoredPi, restoredCtx, "desktop", screenshot, { input: {} });
+    assert.equal(contexts[0].sourceId, "image:1");
+
+    const again = await restoredPi.tools
+      .get("zoom_image")
+      .execute("call", { source_id: "zoom:0", x1: 0, y1: 0, x2: 100, y2: 100 }, undefined, undefined, restoredCtx);
+    assert.equal(again.details.root.path, red);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
