@@ -750,6 +750,22 @@ test("a crop made inside a script is added to the script's result", async () => 
 
     assert.equal(await emitResult({ ...nested, toolCallId: "direct-1" }), undefined);
     assert.equal(await emitResult({ toolName: "codemode", toolCallId: "script-2", content: script }), undefined);
+
+    const later = await tool.execute("script-3/2", { path, x1: 300, y1: 0, x2: 700, y2: 100 }, undefined, undefined, ctx);
+    assert.notEqual(later.content[1].data, crop.content[1].data);
+    await emitResult({
+      toolName: "zoom_image",
+      toolCallId: "script-3/2",
+      parentToolCallId: "script-3",
+      content: later.content,
+      details: later.details,
+    });
+    await emitResult({ ...nested, toolCallId: "script-3/1", parentToolCallId: "script-3" });
+    const ordered = await emitResult({ toolName: "codemode", toolCallId: "script-3", content: script });
+    assert.deepEqual(
+      ordered.content.filter((part: any) => part.type === "image").map((part: any) => part.data),
+      [crop.content[1].data, later.content[1].data],
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
