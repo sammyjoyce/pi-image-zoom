@@ -766,6 +766,10 @@ test("a crop made inside a script is added to the script's result", async () => 
       ordered.content.filter((part: any) => part.type === "image").map((part: any) => part.data),
       [crop.content[1].data, later.content[1].data],
     );
+
+    await emitResult({ ...nested, toolCallId: "relay-1/1", parentToolCallId: "relay-1" });
+    const relayed = await emitResult({ toolName: "relay", toolCallId: "relay-1", content: crop.content });
+    assert.equal(relayed.content.filter((part: any) => part.type === "image").length, 1);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -99,6 +99,11 @@ interface RootDescriptor extends Dimensions {
   path?: string;
 }
 
+interface NestedCrop {
+  text: string;
+  image: ImageContent;
+}
+
 interface ZoomDetails {
   kind: typeof DETAILS_KIND;
   sourceId: string;
@@ -315,7 +320,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
   // original-pixel boxes when it omits the selector.
   let defaultSourceId: string | undefined;
   const toolImageRootIds: string[] = [];
-  const cropsByParentToolCallId = new Map<string, { callNumber: number; blocks: (TextContent | ImageContent)[] }[]>();
+  const cropsByParentToolCallId = new Map<string, { callNumber: number; crops: NestedCrop[] }[]>();
   const releasedToolImageIds = new Set<string>();
   let nextImageIndex = 0;
   let nextZoomIndex = 0;
@@ -646,7 +651,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
   pi.on("tool_result", async (event, ctx) => {
     const crops = (cropsByParentToolCallId.get(event.toolCallId) ?? [])
       .sort((first, second) => first.callNumber - second.callNumber)
-      .flatMap(({ blocks }) => blocks);
+      .flatMap((nested) => nested.crops);
     cropsByParentToolCallId.delete(event.toolCallId);
 
     // A nested result reaches only the tool that made the call, and replacing its content drops
@@ -657,14 +662,14 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
     if (event.parentToolCallId) {
       const [image] = contentImages(event.content);
       if (event.toolName === TOOL_NAME && !event.isError && image && isZoomDetails(event.details)) {
-        crops.push({ type: "text", text: describeCrop(event.details) }, image);
+        crops.push({ text: describeCrop(event.details), image });
       }
       if (crops.length > 0) {
         // Pi names a nested call "<parent id>/<n>" and counts n in the order the calls were made.
         // Results arrive in the order the calls finish.
         const callNumber = Number(event.toolCallId.slice(event.parentToolCallId.length + 1)) || 0;
         const siblings = cropsByParentToolCallId.get(event.parentToolCallId) ?? [];
-        cropsByParentToolCallId.set(event.parentToolCallId, [...siblings, { callNumber, blocks: crops }]);
+        cropsByParentToolCallId.set(event.parentToolCallId, [...siblings, { callNumber, crops }]);
       }
       if (event.toolName === "read") await calibrateReadResult(event, ctx);
       return;
@@ -679,10 +684,15 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       const registered = await registerToolImage(images[index]!, index).catch(() => undefined);
       if (registered) metadata.push(registered);
     }
-    if (metadata.length === 0 && crops.length === 0) return;
+    // A tool that passes on the result of its own zoom_image call already shows that crop.
+    const shown = new Set(images.map((image) => image.data));
+    const missing = crops
+      .filter((crop) => !shown.has(crop.image.data))
+      .flatMap((crop) => [{ type: "text" as const, text: crop.text }, crop.image]);
+    if (metadata.length === 0 && missing.length === 0) return;
     const context = metadata.length > 0 ? [{ type: "text" as const, text: buildZoomContextBlock(metadata) }] : [];
     return {
-      content: [...event.content, ...context, ...crops],
+      content: [...event.content, ...context, ...missing],
       structuredContent: event.structuredContent,
     };
   });
