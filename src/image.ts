@@ -1,4 +1,4 @@
-import sharp from "sharp";
+import sharp, { type Metadata } from "sharp";
 import type { Dimensions, ImageBudget, PixelBox } from "./geometry.ts";
 import { resizedSize, zoomSize } from "./geometry.ts";
 
@@ -38,7 +38,7 @@ function throwIfAborted(signal?: AbortSignal): void {
   }
 }
 
-function orientedDimensionsFromMetadata(metadata: sharp.Metadata): Dimensions {
+function orientedDimensionsFromMetadata(metadata: Metadata): Dimensions {
   if (!metadata.width || !metadata.height) {
     throw new Error("Image dimensions could not be determined");
   }
