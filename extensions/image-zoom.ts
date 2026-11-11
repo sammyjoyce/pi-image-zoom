@@ -304,11 +304,32 @@ function isZoomDetails(value: unknown): value is ZoomDetails {
 }
 
 function describeCrop(details: ZoomDetails): string {
-  const { clampedBox, sourceView, rootCrop, root, output } = details;
-  return [
+  const { requestedBox, clampedBox, sourceView, rootCrop, root, output } = details;
+  const lines: string[] = [];
+  if ((["x1", "y1", "x2", "y2"] as const).some((edge) => requestedBox[edge] !== clampedBox[edge])) {
+    lines.push(
+      `The requested box (${requestedBox.x1},${requestedBox.y1})-(${requestedBox.x2},${requestedBox.y2}) extends past the ${sourceView.width}x${sourceView.height}px image and was clipped.`,
+    );
+  }
+  lines.push(
     `Zoomed ${details.sourceId} box (${clampedBox.x1},${clampedBox.y1})-(${clampedBox.x2},${clampedBox.y2}) in its ${sourceView.width}x${sourceView.height}px coordinate space.`,
-    `Cropped (${rootCrop.left},${rootCrop.top}) ${rootCrop.width}x${rootCrop.height}px from the ${root.width}x${root.height}px full-resolution root and magnified it to ${output.width}x${output.height}px.`,
-  ].join("\n");
+  );
+
+  const cropped = `Cropped (${rootCrop.left},${rootCrop.top}) ${rootCrop.width}x${rootCrop.height}px from the ${root.width}x${root.height}px full-resolution root`;
+  const size = `${output.width}x${output.height}px`;
+  const scale = output.width / rootCrop.width;
+  if (Math.abs(scale - 1) < 0.005) {
+    lines.push(`${cropped} and returned it at full resolution (${size}).`);
+  } else if (scale > 1) {
+    lines.push(`${cropped} and magnified it ${scale.toFixed(2)}x to ${size}.`);
+  } else {
+    const fullResolutionWidth = Math.floor((output.width * (clampedBox.x2 - clampedBox.x1)) / rootCrop.width);
+    const fullResolutionHeight = Math.floor((output.height * (clampedBox.y2 - clampedBox.y1)) / rootCrop.height);
+    lines.push(
+      `${cropped} and reduced it to ${scale.toFixed(2)}x (${size}) to fit the image budget, so fine detail is lost. A box of about ${fullResolutionWidth}x${fullResolutionHeight} or smaller in this coordinate space comes back at full resolution.`,
+    );
+  }
+  return lines.join("\n");
 }
 
 export default function imageZoomExtension(pi: ExtensionAPI): void {
