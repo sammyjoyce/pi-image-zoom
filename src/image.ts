@@ -1,7 +1,12 @@
+import { mkdir } from "node:fs/promises";
+import { dirname, extname } from "node:path";
 import sharp, { type Metadata } from "sharp";
 import type { Dimensions, ImageBudget, PixelBox } from "./geometry.ts";
 import { fitWithin, resizedSize, zoomSize } from "./geometry.ts";
 
+const SAVE_FORMATS = { ".png": "png", ".jpg": "jpeg", ".jpeg": "jpeg", ".webp": "webp" } as const;
+
+export type SaveFormat = (typeof SAVE_FORMATS)[keyof typeof SAVE_FORMATS];
 export type ImageInput = Buffer | string;
 export type OutputFormat = "jpeg" | "png";
 export type ProfileName = "standard" | "high";
@@ -20,6 +25,11 @@ export interface EncodedImage extends Dimensions {
   mimeType: "image/jpeg" | "image/png";
   format: OutputFormat;
   base64Bytes: number;
+}
+
+export interface SavedCrop extends Dimensions {
+  path: string;
+  format: SaveFormat;
 }
 
 export interface PreparedOverview extends EncodedImage {
@@ -219,4 +229,32 @@ export async function cropAndMagnify(
 ): Promise<EncodedImage> {
   const target = fitWithin(zoomSize(crop.width, crop.height, profile), options.maxSize);
   return renderWithinBudget(input, target, crop, format, options);
+}
+
+export function saveFormatForPath(path: string): SaveFormat | undefined {
+  return SAVE_FORMATS[extname(path).toLowerCase() as keyof typeof SAVE_FORMATS];
+}
+
+export async function saveCrop(
+  input: ImageInput,
+  crop: PixelBox,
+  path: string,
+  format: SaveFormat,
+  options: { jpegQuality: number; signal?: AbortSignal },
+): Promise<SavedCrop> {
+  throwIfAborted(options.signal);
+  let pipeline = sharp(input, { animated: false, failOn: "warning" }).rotate().extract(crop);
+  if (format === "jpeg") {
+    pipeline = pipeline
+      .flatten({ background: { r: 255, g: 255, b: 255 } })
+      .jpeg({ quality: options.jpegQuality, chromaSubsampling: "4:4:4" });
+  } else if (format === "webp") {
+    pipeline = pipeline.webp({ lossless: true });
+  } else {
+    pipeline = pipeline.png();
+  }
+  await mkdir(dirname(path), { recursive: true });
+  const info = await pipeline.toFile(path);
+  throwIfAborted(options.signal);
+  return { path, format, width: info.width, height: info.height };
 }

@@ -33,9 +33,13 @@ import {
   getOrientedDimensions,
   IMAGE_PROFILES,
   prepareOverview,
+  saveCrop,
+  saveFormatForPath,
   type OutputFormat,
   type PreparedOverview,
   type ProfileName,
+  type SavedCrop,
+  type SaveFormat,
 } from "../src/image.ts";
 
 const TOOL_NAME = "zoom_image";
@@ -118,6 +122,7 @@ interface ZoomDetails {
   rootCrop: PixelBox;
   output: Dimensions & { mimeType: string; format: OutputFormat; base64Bytes: number };
   profile: ProfileName;
+  saved?: SavedCrop;
 }
 
 const ZoomParameters = obj({
@@ -131,6 +136,12 @@ const ZoomParameters = obj({
     str({
       description:
         "Path to an image file. Coordinates are pixels of the file's full-resolution image.",
+    }),
+  ),
+  save_path: opt(
+    str({
+      description:
+        "Save the crop at the source's own resolution, without zoom magnification. The file extension sets the format (.png, .jpg, .jpeg or .webp). Missing folders are created and an existing file is replaced.",
     }),
   ),
   x1: int({
@@ -188,10 +199,22 @@ function withoutPlaceholders(args: unknown): unknown {
   return Object.fromEntries(Object.entries(args).filter(([, value]) => value !== null && value !== "null"));
 }
 
+/**
+ * Hard links and macOS firmlinks reach one file through paths that realpath leaves different, so
+ * the file identity decides. Some filesystems report inode 0 for every file and fall back to the
+ * resolved path.
+ */
 async function isSameFile(first: string, second: string): Promise<boolean> {
   if (first === second) return true;
-  const [firstReal, secondReal] = await Promise.all([first, second].map((path) => realpath(path).catch(() => undefined)));
-  return firstReal !== undefined && firstReal === secondReal;
+  const [firstStat, secondStat] = await Promise.all(
+    [first, second].map((path) => stat(path, { bigint: true }).catch(() => undefined)),
+  );
+  if (!firstStat || !secondStat) return false;
+  if (firstStat.ino !== 0n && secondStat.ino !== 0n) {
+    return firstStat.dev === secondStat.dev && firstStat.ino === secondStat.ino;
+  }
+  const [firstReal, secondReal] = await Promise.all([realpath(first), realpath(second)]);
+  return firstReal === secondReal;
 }
 
 function positiveIntegerFromEnv(name: string, fallback: number): number {
@@ -327,6 +350,9 @@ function describeCrop(details: ZoomDetails): string {
     lines.push(`${cropped} and returned it at full resolution (${size}).`);
   } else {
     lines.push(`${cropped} and magnified it ${scale.toFixed(2)}x to ${size}.`);
+  }
+  if (details.saved) {
+    lines.push(`Saved the crop at source resolution (${details.saved.width}x${details.saved.height}px) to ${details.saved.path}.`);
   }
   return lines.join("\n");
 }
@@ -849,6 +875,20 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
         source.rootRect,
         { width: root.width, height: root.height },
       );
+      let saveTarget: { path: string; format: SaveFormat } | undefined;
+      if (params.save_path !== undefined) {
+        const path = normalizePathArgument(params.save_path, cwd);
+        const format = saveFormatForPath(path);
+        if (!format) {
+          throw new Error("save_path must have one of these extensions: .png, .jpg, .jpeg, .webp");
+        }
+        for (const registered of roots.values()) {
+          if (registered.input.kind === "path" && await isSameFile(path, registered.input.path)) {
+            throw new Error("save_path cannot overwrite a registered source image because later crops must use its unchanged pixels.");
+          }
+        }
+        saveTarget = { path, format };
+      }
       const profileName = params.profile ?? config.profile;
       const format = params.output_format ?? "jpeg";
       const input = root.input.kind === "path" ? root.input.path : Buffer.from(root.input.data, "base64");
@@ -876,6 +916,10 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       const output = await cropAndMagnify(input, rootCrop, profile, format, underPiBytes).catch(() =>
         cropAndMagnify(input, rootCrop, profile, format, withinPiSize),
       );
+
+      const saved = saveTarget
+        ? await saveCrop(input, rootCrop, saveTarget.path, saveTarget.format, { jpegQuality: config.jpegQuality, signal })
+        : undefined;
 
       const resultSourceId = `zoom:${nextZoomIndex++}`;
       addDerivedSource({
@@ -912,6 +956,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
           base64Bytes: output.base64Bytes,
         },
         profile: profileName,
+        saved,
       };
 
       const text = [
@@ -930,11 +975,12 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
 
     renderCall(args, theme) {
       // Pi 1.5.2 types render arguments with TypeBox's Static, which is unknown for a pi-schema schema.
-      const { source_id, path, x1, y1, x2, y2 } = args as ZoomParams;
+      const { source_id, path, save_path, x1, y1, x2, y2 } = args as ZoomParams;
       const selector = source_id ?? path ?? "latest image";
       const region = `(${x1},${y1})–(${x2},${y2})`;
+      const save = save_path !== undefined ? ` ${theme.fg("muted", save_path)}` : "";
       return new Text(
-        `${theme.fg("toolTitle", theme.bold("zoom image"))} ${theme.fg("accent", String(selector))} ${theme.fg("muted", region)}`,
+        `${theme.fg("toolTitle", theme.bold("zoom image"))} ${theme.fg("accent", String(selector))} ${theme.fg("muted", region)}${save}`,
         0,
         0,
       );
