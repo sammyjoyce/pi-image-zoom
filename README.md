@@ -10,6 +10,7 @@ The extension registers `zoom_image`, which accepts an absolute pixel rectangle,
 - **Full-resolution crops.** File-backed images are always cropped from the original file, not the overview sent to the model.
 - **Images from other tools.** An image that any other tool returns, such as a screenshot, becomes an `image:N` source addressed in its original pixels. Pi resizes the picture the model sees, and the extension crops from the full-size bytes. It keeps those bytes in memory for the newest 8 tool images. After a session reload it crops from the picture stored in the session.
 - **Recursive zoom without generation loss.** Every crop gets a `zoom:N` source ID whose coordinate space maps back to the original image. A second zoom therefore crops the original pixels again rather than cropping the enlarged JPEG.
+- **Crops from scripts.** When a codemode script calls `zoom_image`, the script receives only the text of the result. The extension adds each crop to the result of the script, so the model sees it.
 - **Multiple images.** The model can select a `source_id` or a direct `path`.
 - **Provider-safe history.** Zoom results default to high-quality 4:4:4 JPEG and are kept below a configurable base64 payload budget. PNG remains available for tiny text and line art.
 - **Branch-aware state.** Root images and zoom transforms are reconstructed from the active Pi session branch after resume, reload, or tree navigation.
