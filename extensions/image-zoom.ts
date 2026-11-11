@@ -168,6 +168,12 @@ function withLegacyImageIndex(args: unknown): unknown {
   return rest.source_id == null ? { ...rest, source_id: `image:${index.value}` } : rest;
 }
 
+/** Some models fill every optional field and send null or the string "null" for the ones they do not use. */
+function withoutPlaceholders(args: unknown): unknown {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return args;
+  return Object.fromEntries(Object.entries(args).filter(([, value]) => value !== null && value !== "null"));
+}
+
 function positiveIntegerFromEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -563,7 +569,12 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
 
   async function resolveSource(params: ZoomParams, cwd: string): Promise<{ source: SourceRecord; root: RootRecord }> {
     if (params.source_id !== undefined && params.path !== undefined) {
-      throw new Error("Choose exactly one of source_id or path");
+      const named = sources.get(params.source_id);
+      if (named && named.path !== normalizePathArgument(params.path, cwd)) {
+        throw new Error(
+          `source_id ${JSON.stringify(params.source_id)} and path ${JSON.stringify(params.path)} name different images. Send only one of them.`,
+        );
+      }
     }
 
     let source: SourceRecord | undefined;
@@ -625,7 +636,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       "Prefer JPEG for normal iterative inspection and PNG when tiny text or one-pixel line work needs lossless rendering.",
     ],
     parameters: ZoomParameters,
-    prepareArguments: withLegacyImageIndex,
+    prepareArguments: (args) => withLegacyImageIndex(withoutPlaceholders(args)),
 
     async execute(_toolCallId, params: ZoomParams, signal, _onUpdate, ctx) {
       const cwd = ctx?.cwd ?? process.cwd();
