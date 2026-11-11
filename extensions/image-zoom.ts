@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, extname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -166,6 +166,18 @@ function withLegacyImageIndex(args: unknown): unknown {
   const index = legacyImageIndex.parse(imageIndex);
   if (!index.ok) return sent;
   return rest.source_id == null ? { ...rest, source_id: `image:${index.value}` } : rest;
+}
+
+/** Some models fill every optional field and send null or the string "null" for the ones they do not use. */
+function withoutPlaceholders(args: unknown): unknown {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return args;
+  return Object.fromEntries(Object.entries(args).filter(([, value]) => value !== null && value !== "null"));
+}
+
+async function isSameFile(first: string, second: string): Promise<boolean> {
+  if (first === second) return true;
+  const [firstReal, secondReal] = await Promise.all([first, second].map((path) => realpath(path).catch(() => undefined)));
+  return firstReal !== undefined && firstReal === secondReal;
 }
 
 function positiveIntegerFromEnv(name: string, fallback: number): number {
@@ -563,7 +575,13 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
 
   async function resolveSource(params: ZoomParams, cwd: string): Promise<{ source: SourceRecord; root: RootRecord }> {
     if (params.source_id !== undefined && params.path !== undefined) {
-      throw new Error("Choose exactly one of source_id or path");
+      const named = sources.get(params.source_id);
+      const namesWholeImage = named?.id === named?.rootId && named?.path !== undefined;
+      if (named && !(namesWholeImage && (await isSameFile(named.path!, normalizePathArgument(params.path, cwd))))) {
+        throw new Error(
+          `source_id ${JSON.stringify(params.source_id)} and path ${JSON.stringify(params.path)} name different images. Send only one of them.`,
+        );
+      }
     }
 
     let source: SourceRecord | undefined;
@@ -625,7 +643,7 @@ export default function imageZoomExtension(pi: ExtensionAPI): void {
       "Prefer JPEG for normal iterative inspection and PNG when tiny text or one-pixel line work needs lossless rendering.",
     ],
     parameters: ZoomParameters,
-    prepareArguments: withLegacyImageIndex,
+    prepareArguments: (args) => withLegacyImageIndex(withoutPlaceholders(args)),
 
     async execute(_toolCallId, params: ZoomParams, signal, _onUpdate, ctx) {
       const cwd = ctx?.cwd ?? process.cwd();
