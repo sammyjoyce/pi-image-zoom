@@ -105,6 +105,23 @@ You can inspect the registry manually with:
 }
 ```
 
+### Save a crop to a file
+
+Add `save_path` to return the crop and save it to a file in the same call:
+
+```json
+{
+  "path": "./screenshots/settings.png",
+  "x1": 100,
+  "y1": 80,
+  "x2": 600,
+  "y2": 420,
+  "save_path": "./crops/settings-panel.png"
+}
+```
+
+The saved file is at source resolution, without zoom magnification or the model image budget. The file extension sets the format. Allowed extensions are `.png`, `.jpg`, `.jpeg`, and `.webp`. Relative paths resolve against the current working directory. Missing folders are created and an existing file is replaced, but a registered source image cannot be overwritten.
+
 ## Profiles
 
 The default is the cookbook's broadly compatible standard image budget:
@@ -158,7 +175,7 @@ npm run check
 npm run pack:check
 ```
 
-The tests cover budget sizing, coordinate clamping/mapping, context persistence, overview preparation, crop magnification, recursive zooms, built-in `read` interception, commands, and session restoration.
+The tests cover budget sizing, coordinate clamping/mapping, context persistence, overview preparation, crop magnification, saving crops at source resolution, recursive zooms, built-in `read` interception, commands, and session restoration.
 
 ## Attribution
 

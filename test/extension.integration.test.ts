@@ -246,6 +246,109 @@ test("calibrates, recursively zooms, intercepts read, and restores branch state"
   }
 });
 
+test("save_path writes the crop at source resolution and reports the saved file", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-save-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, "source.png");
+  const savePath = join(dir, "crop.PNG");
+  await writeSolidImage(path, 600, 400, "#336699");
+  await writeSolidImage(savePath, 1, 1, "#ff0000");
+  const pi = new MockPi();
+  imageZoomExtension(pi as any);
+  const ctx = makeContext(dir);
+
+  const result = await pi.tools.get("zoom_image").execute(
+    "save",
+    { path, x1: 30, y1: 40, x2: 150, y2: 120, save_path: savePath },
+    undefined,
+    undefined,
+    ctx,
+  );
+
+  const metadata = await sharp(savePath).metadata();
+  assert.equal(metadata.width, 120);
+  assert.equal(metadata.height, 80);
+  assert.equal(metadata.format, "png");
+  assert.ok(result.details.output.width > metadata.width, "the saved crop is not the magnified model image");
+  assert.deepEqual(result.details.saved, { path: savePath, format: "png", width: 120, height: 80 });
+  assert.ok(result.content[0].text.includes(`Saved the crop at source resolution (120x80px) to ${savePath}.`));
+});
+
+test("a relative save_path resolves against cwd and creates missing folders", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-relative-save-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, "source.png");
+  await writeSolidImage(path, 600, 400, "#336699");
+  const pi = new MockPi();
+  imageZoomExtension(pi as any);
+  const result = await pi.tools.get("zoom_image").execute(
+    "save-relative",
+    { path, x1: 10, y1: 20, x2: 110, y2: 70, save_path: "missing/crops/region.png" },
+    undefined,
+    undefined,
+    makeContext(dir),
+  );
+
+  const savedPath = join(dir, "missing/crops/region.png");
+  assert.equal(result.details.saved.path, savedPath);
+  const metadata = await sharp(savedPath).metadata();
+  assert.equal(metadata.width, 100);
+  assert.equal(metadata.height, 50);
+});
+
+test("invalid save extensions and failed writes do not consume zoom ids", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-invalid-save-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, "source.png");
+  await writeSolidImage(path, 600, 400, "#336699");
+  const pi = new MockPi();
+  imageZoomExtension(pi as any);
+  const tool = pi.tools.get("zoom_image");
+  const ctx = makeContext(dir);
+  const box = { path, x1: 10, y1: 20, x2: 110, y2: 70 };
+  const first = await tool.execute("first", box, undefined, undefined, ctx);
+  assert.equal(first.details.resultSourceId, "zoom:0");
+
+  for (const save_path of ["crop.gif", "crop"]) {
+    await assert.rejects(
+      tool.execute("invalid", { ...box, save_path }, undefined, undefined, ctx),
+      /\.png, \.jpg, \.jpeg, \.webp/,
+    );
+  }
+  await assert.rejects(
+    tool.execute("failed-write", { ...box, save_path: join(path, "crop.png") }, undefined, undefined, ctx),
+    /ENOTDIR|EEXIST/,
+  );
+  const next = await tool.execute("next", box, undefined, undefined, ctx);
+  assert.equal(next.details.resultSourceId, "zoom:1");
+});
+
+test("save_path cannot overwrite any registered source, including a symlink", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "pi-image-zoom-source-save-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, "source.png");
+  const other = join(dir, "other.png");
+  const alias = join(dir, "alias.png");
+  await writeSolidImage(path, 600, 400, "#336699");
+  await writeSolidImage(other, 200, 200, "#ff0000");
+  await symlink(path, alias);
+  const original = await readFile(path);
+  const pi = new MockPi();
+  imageZoomExtension(pi as any);
+  const tool = pi.tools.get("zoom_image");
+  const ctx = makeContext(dir);
+  const box = { x1: 10, y1: 20, x2: 110, y2: 70 };
+
+  await tool.execute("register", { ...box, path }, undefined, undefined, ctx);
+  for (const [source, save_path] of [[path, path], [other, path], [other, alias]]) {
+    await assert.rejects(
+      tool.execute("overwrite", { ...box, path: source, save_path }, undefined, undefined, ctx),
+      /cannot overwrite a registered source image.*unchanged pixels/,
+    );
+    assert.deepEqual(await readFile(path), original, "a rejected save leaves the source bytes unchanged");
+  }
+});
+
 test("zoom_image parameters accept, coerce, and reject arguments through Pi's validator", () => {
   const pi = new MockPi();
   imageZoomExtension(pi as any);
@@ -255,11 +358,12 @@ test("zoom_image parameters accept, coerce, and reject arguments through Pi's va
   const box = { x1: 10, y1: 20, x2: 300, y2: 400 };
 
   assert.deepEqual(validate(box), box);
-  assert.deepEqual(validate({ ...box, path: "a.png", profile: "high", output_format: "png" }), {
+  assert.deepEqual(validate({ ...box, path: "a.png", profile: "high", output_format: "png", save_path: "crop.png" }), {
     ...box,
     path: "a.png",
     profile: "high",
     output_format: "png",
+    save_path: "crop.png",
   });
   assert.deepEqual(validate({ x1: "10", y1: "20", x2: "300", y2: "400" }), box);
   assert.deepEqual(validate({ ...box, source_id: null, path: null, profile: null, output_format: null }), box);
@@ -728,7 +832,8 @@ test("a crop made inside a script is added to the script's result", async () => 
       (await pi.emit("tool_result", { type: "tool_result", input: {}, details: undefined, isError: false, ...event }, ctx))[0];
     const script = [{ type: "text", text: "Script completed" }];
 
-    const crop = await tool.execute("script-1/1", { path, x1: 0, y1: 0, x2: 200, y2: 100 }, undefined, undefined, ctx);
+    const savePath = join(dir, "script-crop.png");
+    const crop = await tool.execute("script-1/1", { path, x1: 0, y1: 0, x2: 200, y2: 100, save_path: savePath }, undefined, undefined, ctx);
     const nested = { toolName: "zoom_image", content: crop.content, details: crop.details };
     assert.equal(await emitResult({ ...nested, toolCallId: "script-1/1", parentToolCallId: "script-1" }), undefined);
     await emitResult({
@@ -746,6 +851,7 @@ test("a crop made inside a script is added to the script's result", async () => 
       ["text", "image"],
     );
     assert.match(result.content[1].text, /^Zoomed \S+ box \(0,0\)-\(200,100\)/);
+    assert.ok(result.content[1].text.includes(`Saved the crop at source resolution (200x100px) to ${savePath}.`));
     assert.doesNotMatch(result.content[1].text, /zoom:\d/);
     assert.equal(result.content[2].data, crop.content[1].data);
     assert.equal(parseZoomContexts(result.content[1].text).length, 0);
